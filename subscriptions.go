@@ -41,5 +41,6 @@ func (s *Subscription) Unsubscribe() error {
 	if s.unsubscribeFn != nil {
 		return s.unsubscribeFn()
 	}
+
 	return nil
 }

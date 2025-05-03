@@ -2,11 +2,15 @@ package blazesub
 
 import (
 	"strconv"
+	"sync"
 	"testing"
 )
 
 func TestTrieUnsubscribeTable(t *testing.T) {
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	tests := []struct {
 		name          string
@@ -226,7 +230,10 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 
 // TestUnsubscribeMaintainsMemory tests to see if the unsubscribe function correctly cleans up memory
 func TestUnsubscribeMaintainsMemory(t *testing.T) {
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 	trie := NewSubscriptionTrie()
 
 	// Add a lot of subscriptions with a common prefix
@@ -268,7 +275,10 @@ func TestUnsubscribeMaintainsMemory(t *testing.T) {
 
 // TestResubscribePerformance tests the performance implications of unsubscribing and resubscribing
 func TestResubscribePerformance(t *testing.T) {
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 	trie := NewSubscriptionTrie()
 
 	// First, let's add 100 subscriptions

@@ -1,8 +1,8 @@
 package blazesub
 
-import "fmt"
+import "errors"
 
 var (
-	ErrInvalidFilter = fmt.Errorf("invalid filter")
-	ErrInvalidTopic  = fmt.Errorf("invalid topic")
+	ErrInvalidFilter = errors.New("invalid filter")
+	ErrInvalidTopic  = errors.New("invalid topic")
 )

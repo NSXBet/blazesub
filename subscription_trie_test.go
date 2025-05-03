@@ -13,10 +13,11 @@ type mockHandler struct {
 	mutex           sync.Mutex
 }
 
-func (m *mockHandler) OnMessage(message *Message) error {
+func (m *mockHandler) OnMessage(_ *Message) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.messageReceived = true
+
 	return nil
 }
 
@@ -42,7 +43,10 @@ func TestNewSubscriptionTrie(t *testing.T) {
 
 func TestSubscribeAndFindExactMatch(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Subscribe to a topic
 	subscription := trie.Subscribe(1, "test/topic", handler)
@@ -71,7 +75,10 @@ func TestSubscribeAndFindExactMatch(t *testing.T) {
 	}
 
 	// Subscribe another handler to the same topic
-	anotherHandler := &mockHandler{}
+	anotherHandler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 	anotherSub := trie.Subscribe(2, "test/topic", anotherHandler)
 
 	if anotherSub == nil {
@@ -87,7 +94,10 @@ func TestSubscribeAndFindExactMatch(t *testing.T) {
 
 func TestUnsubscribe(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Subscribe to a topic
 	subscription := trie.Subscribe(1, "test/topic", handler)
@@ -123,7 +133,10 @@ func TestUnsubscribe(t *testing.T) {
 // Rest of the test cases remain similar but with removed references to bus
 func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Create subscriptions with wildcards
 	trie.Subscribe(1, "test/+/topic", handler)  // + wildcard
@@ -179,7 +192,10 @@ func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 
 func TestCleanupEmptyNodes(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Subscribe to a nested topic
 	trie.Subscribe(1, "deep/nested/topic/path", handler)
@@ -205,7 +221,10 @@ func TestCleanupEmptyNodes(t *testing.T) {
 
 func TestMultiLevelWildcardMatch(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Subscribe with multi-level wildcard
 	trie.Subscribe(1, "a/+/+/d", handler) // Matches a/?/?/d
@@ -232,7 +251,10 @@ func TestMultiLevelWildcardMatch(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Use a wait group to synchronize goroutines
 	var wg sync.WaitGroup
@@ -297,7 +319,10 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestFindMatchesWithMultipleWildcards(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Add subscriptions with various wildcards
 	trie.Subscribe(1, "a/+/c", handler) // Matches a/?/c
@@ -328,7 +353,10 @@ func TestFindMatchesWithMultipleWildcards(t *testing.T) {
 
 func TestWildcardAtDifferentPositions(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Test # wildcard at different positions
 	trie.Subscribe(1, "#", handler)     // Matches everything
@@ -362,7 +390,10 @@ func TestWildcardAtDifferentPositions(t *testing.T) {
 
 func TestEmptySegments(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Test topics with empty segments
 	trie.Subscribe(1, "a//c", handler) // Has empty middle segment
@@ -401,7 +432,10 @@ func TestEmptySegments(t *testing.T) {
 
 func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Add a bunch of subscriptions
 	for i := uint64(1); i <= 10; i++ {
@@ -443,7 +477,10 @@ func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
 
 func BenchmarkSubscribe(b *testing.B) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -453,7 +490,10 @@ func BenchmarkSubscribe(b *testing.B) {
 
 func BenchmarkFindMatchingSubscriptions(b *testing.B) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Add some subscriptions for the benchmark
 	trie.Subscribe(1, "benchmark/topic", handler)
@@ -469,7 +509,10 @@ func BenchmarkFindMatchingSubscriptions(b *testing.B) {
 
 func BenchmarkUnsubscribe(b *testing.B) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Pre-populate
 	for i := 0; i < b.N; i++ {
@@ -484,7 +527,10 @@ func BenchmarkUnsubscribe(b *testing.B) {
 
 func BenchmarkWildcardMatching(b *testing.B) {
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Add a lot of wildcard subscriptions
 	topics := []string{
@@ -520,7 +566,10 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	trie := NewSubscriptionTrie()
 	linearSubscriptions := make([]*Subscription, 0, numSubscriptions)
 	mapSubscriptions := make(map[string][]*Subscription) // Direct map for fastest possible lookup
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Generate subscriptions with a mix of exact matches and wildcards
 	topics := make([]string, 0, numTopics)
@@ -625,7 +674,10 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 	// Create implementations
 	trie := NewSubscriptionTrie()
 	mapSubscriptions := make(map[string][]*Subscription) // Direct map
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
@@ -705,7 +757,10 @@ func matchTopic(filter, topic string) bool {
 
 // BenchmarkTrieWithDifferentWildcardDensities measures how wildcards affect performance
 func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Test with different percentages of wildcard subscriptions
 	densities := []int{0, 5, 10, 25, 50, 75, 100}
@@ -767,7 +822,10 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 	const numTopics = 1000
 	const numSubscriptions = 5000
 
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)

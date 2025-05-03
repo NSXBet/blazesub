@@ -3,6 +3,7 @@ package blazesub
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -14,17 +15,20 @@ func BenchmarkHybridTrieExactMatch(b *testing.B) {
 
 	// Create test implementation
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
-	for i := 0; i < numTopics; i++ {
+	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
 	}
 
 	// Add exact match subscriptions
-	for i := 0; i < numSubscriptions; i++ {
+	for i := range numSubscriptions {
 		topicIndex := i % numTopics
 		topic := topics[topicIndex]
 		trie.Subscribe(uint64(i), topic, handler)
@@ -32,12 +36,12 @@ func BenchmarkHybridTrieExactMatch(b *testing.B) {
 
 	// Create test topics (all exact matches)
 	testTopics := make([]string, 100)
-	for i := 0; i < len(testTopics); i++ {
+	for i := range testTopics {
 		testTopics[i] = topics[i%numTopics]
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		topic := testTopics[i%len(testTopics)]
 		_ = trie.FindMatchingSubscriptions(topic)
 	}
@@ -49,11 +53,14 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 	const numTopics = 1000
 	const numSubscriptions = 5000
 
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
-	for i := 0; i < numTopics; i++ {
+	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
 	}
@@ -63,7 +70,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 		trie := NewSubscriptionTrie()
 
 		// Populate subscriptions
-		for i := 0; i < numSubscriptions; i++ {
+		for i := range numSubscriptions {
 			topicIndex := i % numTopics
 			topic := topics[topicIndex]
 			trie.Subscribe(uint64(i), topic, handler)
@@ -71,12 +78,12 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 
 		// Create test topics
 		testTopics := make([]string, 100)
-		for i := 0; i < len(testTopics); i++ {
+		for i := range testTopics {
 			testTopics[i] = topics[i%numTopics]
 		}
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = trie.FindMatchingSubscriptions(topic)
 		}
@@ -90,20 +97,25 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 				segment:       "",
 				children:      make(map[string]*TrieNode),
 				subscriptions: make(map[uint64]*Subscription),
+				mutex:         sync.RWMutex{},
 			},
-			exactMatches: nil, // Setting to nil to emulate original behavior
+			exactMatches:    nil, // Setting to nil to emulate original behavior
+			exactMatchMutex: sync.RWMutex{},
 		}
+		// Initialize wildcard counter to 0
+		trie.wildcardCount.Store(0)
 
 		// Populate subscriptions (adding only to the trie, not the map)
-		for i := 0; i < numSubscriptions; i++ {
-			topicIndex := i % numTopics
+		for index := range numSubscriptions {
+			topicIndex := index % numTopics
 			topic := topics[topicIndex]
 
 			// Create a new subscription
 			subscription := &Subscription{
-				id:      uint64(i),
-				topic:   topic,
-				handler: handler,
+				id:            uint64(index),
+				topic:         topic,
+				handler:       handler,
+				unsubscribeFn: nil,
 			}
 
 			// Manually add to trie (simulating original behavior)
@@ -117,6 +129,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 						segment:       segment,
 						children:      make(map[string]*TrieNode),
 						subscriptions: make(map[uint64]*Subscription),
+						mutex:         sync.RWMutex{},
 					}
 				}
 
@@ -124,18 +137,18 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			}
 
 			// Add the subscription to the final node's map
-			currentNode.subscriptions[uint64(i)] = subscription
+			currentNode.subscriptions[uint64(index)] = subscription
 			trie.root.mutex.Unlock()
 		}
 
 		// Create test topics
 		testTopics := make([]string, 100)
-		for i := 0; i < len(testTopics); i++ {
+		for i := range testTopics {
 			testTopics[i] = topics[i%numTopics]
 		}
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 
 			// Manually emulate the original FindMatchingSubscriptions
@@ -149,6 +162,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			for _, sub := range resultMap {
 				result = append(result, sub)
 			}
+
 			_ = result
 		}
 	})
@@ -159,21 +173,25 @@ func BenchmarkMixedWorkload(b *testing.B) {
 	// Generate test data
 	const numTopics = 1000
 	const numSubscriptions = 5000
-	const numWildcardSubs = 50
+	// Commented out to fix unused const error
+	// const numWildcardSubs = 50
 
 	// Create implementations
 	trie := NewSubscriptionTrie()
-	handler := &mockHandler{}
+	handler := &mockHandler{
+		messageReceived: false,
+		mutex:           sync.Mutex{},
+	}
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
-	for i := 0; i < numTopics; i++ {
+	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
 	}
 
 	// Add exact match subscriptions
-	for i := 0; i < numSubscriptions; i++ {
+	for i := range numSubscriptions {
 		topicIndex := i % numTopics
 		topic := topics[topicIndex]
 		trie.Subscribe(uint64(i), topic, handler)
@@ -194,7 +212,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 
 	// Create mixed test workload (80% exact matches, 20% topics that match wildcards)
 	testTopics := make([]string, 100)
-	for i := 0; i < len(testTopics); i++ {
+	for i := range testTopics {
 		if i < 80 {
 			// Exact match
 			testTopics[i] = topics[i%numTopics]
@@ -205,7 +223,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		topic := testTopics[i%len(testTopics)]
 		_ = trie.FindMatchingSubscriptions(topic)
 	}

@@ -68,7 +68,7 @@ func NoOpHandler(tb testing.TB) *noOpHandler {
 	}
 }
 
-func (h *noOpHandler) OnMessage(message *blazesub.Message) error {
+func (h *noOpHandler) OnMessage(_ *blazesub.Message) error {
 	h.MessageCount.Add(1)
 
 	return nil
