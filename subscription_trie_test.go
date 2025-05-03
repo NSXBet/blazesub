@@ -20,41 +20,6 @@ func (m *mockHandler) OnMessage(message *Message) error {
 	return nil
 }
 
-func (m *mockHandler) wasMessageReceived() bool {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	return m.messageReceived
-}
-
-// TestSubscription is a test implementation of Subscription
-type TestSubscription struct {
-	id                uint64
-	topic             string
-	handler           MessageHandler
-	unsubscribeFn     func() error
-	unsubscribeCalled bool
-}
-
-func (s *TestSubscription) ID() uint64 {
-	return s.id
-}
-
-func (s *TestSubscription) Topic() string {
-	return s.topic
-}
-
-func (s *TestSubscription) SetUnsubscribeFunc(fn func() error) {
-	s.unsubscribeFn = fn
-}
-
-func (s *TestSubscription) Unsubscribe() error {
-	s.unsubscribeCalled = true
-	if s.unsubscribeFn != nil {
-		return s.unsubscribeFn()
-	}
-	return nil
-}
-
 func TestNewSubscriptionTrie(t *testing.T) {
 	trie := NewSubscriptionTrie()
 

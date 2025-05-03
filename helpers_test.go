@@ -40,6 +40,14 @@ func (h *SpyHandler) SetDelay(delay time.Duration) {
 	h.delay = delay
 }
 
+// Reset clears all stored messages
+func (h *SpyHandler) Reset() {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	h.Messages = make(map[string][]*blazesub.Message)
+}
+
 func SpyMessageHandler(t *testing.T) *SpyHandler {
 	t.Helper()
 
