@@ -2,7 +2,6 @@ package blazesub_test
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -12,16 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockMsgHandler struct {
-	messageReceived bool
-	mutex           sync.Mutex
-}
+type mockMsgHandler struct{}
 
 func (m *mockMsgHandler) OnMessage(_ *blazesub.Message) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.messageReceived = true
-
 	return nil
 }
 
@@ -62,10 +54,16 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 	// Payload for publishing
 	payload := []byte("test message payload")
 
-	// Run benchmark for BlazeSub Bus
-	b.Run("BlazeSub", func(b *testing.B) {
-		// Create a new bus
-		bus, err := blazesub.NewBusWithDefaults()
+	// Run benchmark for BlazeSub Bus with worker pool
+	b.Run("BlazeSub_WorkerPool", func(b *testing.B) {
+		// Create a new bus with worker pool
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: true, // Use worker pool
+		}
+		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
 		defer func() {
 			require.NoError(b, bus.Close())
@@ -79,10 +77,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 			require.NoError(b, err)
 
 			// Set a handler
-			handler := &mockMsgHandler{
-				messageReceived: false,
-				mutex:           sync.Mutex{},
-			}
+			handler := &mockMsgHandler{}
 			sub.OnMessage(handler)
 		}
 
@@ -92,10 +87,54 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 			require.NoError(b, err)
 
 			// Set a handler
-			handler := &mockMsgHandler{
-				messageReceived: false,
-				mutex:           sync.Mutex{},
-			}
+			handler := &mockMsgHandler{}
+			sub.OnMessage(handler)
+		}
+
+		// Give a moment for subscriptions to settle
+		time.Sleep(100 * time.Millisecond)
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			topic := publishTopics[i%len(publishTopics)]
+			bus.Publish(topic, payload)
+		}
+	})
+
+	// Run benchmark for BlazeSub Bus with direct goroutines
+	b.Run("BlazeSub_DirectGoroutines", func(b *testing.B) {
+		// Create a new bus with direct goroutines
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: false, // Use direct goroutines
+		}
+		bus, err := blazesub.NewBus(config)
+		require.NoError(b, err)
+		defer func() {
+			require.NoError(b, bus.Close())
+		}()
+
+		// Create subscriptions - exact matches
+		for i := 0; i < numSubscriptions-5; i++ {
+			topicIndex := i % numTopics
+			topic := exactTopics[topicIndex]
+			sub, err := bus.Subscribe(topic)
+			require.NoError(b, err)
+
+			// Set a handler
+			handler := &mockMsgHandler{}
+			sub.OnMessage(handler)
+		}
+
+		// Add some wildcard subscriptions
+		for _, wildcardTopic := range wildcardTopics {
+			sub, err := bus.Subscribe(wildcardTopic)
+			require.NoError(b, err)
+
+			// Set a handler
+			handler := &mockMsgHandler{}
 			sub.OnMessage(handler)
 		}
 
@@ -160,10 +199,16 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 	// Payload for publishing
 	payload := []byte("test message payload")
 
-	// Benchmark for BlazeSub Bus
-	b.Run("BlazeSub_Concurrent", func(b *testing.B) {
-		// Create a new bus
-		bus, err := blazesub.NewBusWithDefaults()
+	// Benchmark for BlazeSub Bus with worker pool
+	b.Run("BlazeSub_WorkerPool_Concurrent", func(b *testing.B) {
+		// Create a new bus with worker pool
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: true, // Use worker pool
+		}
+		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
 		defer func() {
 			require.NoError(b, bus.Close())
@@ -175,10 +220,44 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 			require.NoError(b, err)
 
 			// Set a handler
-			handler := &mockMsgHandler{
-				messageReceived: false,
-				mutex:           sync.Mutex{},
+			handler := &mockMsgHandler{}
+			sub.OnMessage(handler)
+		}
+
+		b.ResetTimer()
+
+		b.RunParallel(func(pb *testing.PB) {
+			counter := 0
+			for pb.Next() {
+				topic := topics[counter%numTopics]
+				bus.Publish(topic, payload)
+				counter++
 			}
+		})
+	})
+
+	// Benchmark for BlazeSub Bus with direct goroutines
+	b.Run("BlazeSub_DirectGoroutines_Concurrent", func(b *testing.B) {
+		// Create a new bus with direct goroutines
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: false, // Use direct goroutines
+		}
+		bus, err := blazesub.NewBus(config)
+		require.NoError(b, err)
+		defer func() {
+			require.NoError(b, bus.Close())
+		}()
+
+		// Create subscriptions
+		for _, topic := range topics {
+			sub, err := bus.Subscribe(topic)
+			require.NoError(b, err)
+
+			// Set a handler
+			handler := &mockMsgHandler{}
 			sub.OnMessage(handler)
 		}
 
@@ -229,10 +308,16 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 
 // BenchmarkBusVsMQTTSubscribeUnsubscribe compares the performance of subscribe/unsubscribe operations.
 func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
-	// Benchmark for BlazeSub Bus
-	b.Run("BlazeSub_SubscribeUnsubscribe", func(b *testing.B) {
-		// Create a new bus
-		bus, err := blazesub.NewBusWithDefaults()
+	// Benchmark for BlazeSub Bus with worker pool
+	b.Run("BlazeSub_WorkerPool_SubscribeUnsubscribe", func(b *testing.B) {
+		// Create a new bus with worker pool
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: true, // Use worker pool
+		}
+		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
 		defer func() {
 			require.NoError(b, bus.Close())
@@ -249,11 +334,46 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 				b.Fatalf("Failed to subscribe: %v", err)
 			}
 
-			// Set handler
-			handler := &mockMsgHandler{
-				messageReceived: false,
-				mutex:           sync.Mutex{},
+			// Set a handler
+			handler := &mockMsgHandler{}
+			sub.OnMessage(handler)
+
+			// Unsubscribe
+			err = sub.Unsubscribe()
+			if err != nil {
+				b.Fatalf("Failed to unsubscribe: %v", err)
 			}
+		}
+	})
+
+	// Benchmark for BlazeSub Bus with direct goroutines
+	b.Run("BlazeSub_DirectGoroutines_SubscribeUnsubscribe", func(b *testing.B) {
+		// Create a new bus with direct goroutines
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: false, // Use direct goroutines
+		}
+		bus, err := blazesub.NewBus(config)
+		require.NoError(b, err)
+		defer func() {
+			require.NoError(b, bus.Close())
+		}()
+
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			topic := fmt.Sprintf("test/sub/%d", i)
+
+			// Subscribe
+			sub, err := bus.Subscribe(topic)
+			if err != nil {
+				b.Fatalf("Failed to subscribe: %v", err)
+			}
+
+			// Set a handler
+			handler := &mockMsgHandler{}
 			sub.OnMessage(handler)
 
 			// Unsubscribe

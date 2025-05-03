@@ -13,6 +13,7 @@ type Config struct {
 	MaxConcurrentSubscriptions int
 	ExpiryDuration             time.Duration
 	Logger                     logr.Logger
+	UseGoroutinePool           bool
 }
 
 const (
@@ -28,5 +29,6 @@ func NewConfig() Config {
 		MaxBlockingTasks:           DefaultMaxBlockingTasks,
 		ExpiryDuration:             0,
 		MaxConcurrentSubscriptions: DefaultMaxConcurrentSubscriptions,
+		UseGoroutinePool:           true,
 	}
 }

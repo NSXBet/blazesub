@@ -20,7 +20,7 @@ type MessageHandler interface {
 type Bus struct {
 	subID         *atomic.Uint64
 	subscriptions *SubscriptionTrie
-	pubpool       *ants.Pool
+	pubpool       *ants.Pool // Will be nil if UseGoroutinePool is false
 	logger        logr.Logger
 
 	// Cache recently used topics for faster lookup
@@ -28,6 +28,7 @@ type Bus struct {
 	maxCacheSize int
 
 	maxConcurrentSubscriptions int
+	useGoroutinePool           bool // Whether using worker pool or direct goroutines
 }
 
 func NewBus(config Config) (*Bus, error) {
@@ -45,48 +46,56 @@ func NewBus(config Config) (*Bus, error) {
 		maxConcurrentSubscriptions = 10
 	}
 
-	// Optimize pool options for maximum performance
-	options := []ants.Option{
-		ants.WithPanicHandler(func(err any) {
-			typedErr, ok := err.(error)
-			if !ok {
-				return
-			}
-
-			config.Logger.Error(typedErr, "panic in publish pool")
-		}),
-		ants.WithPreAlloc(true), // Always preallocate for better performance
-		ants.WithMaxBlockingTasks(config.MaxBlockingTasks),
-		ants.WithNonblocking(true), // Use non-blocking mode for high performance
-	}
-
-	if config.ExpiryDuration > 0 {
-		options = append(options, ants.WithExpiryDuration(config.ExpiryDuration))
-	}
-
-	// Set a minimum pool size for better performance
-	poolSize := config.WorkerCount
-	if poolSize < 20000 {
-		poolSize = 20000 // Ensure we have enough workers for high throughput
-	}
-
-	pool, err := ants.NewPool(
-		poolSize,
-		options...,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("creating publish pool: %w", err)
-	}
-
-	return &Bus{
+	// Create a new bus instance
+	bus := &Bus{
 		subID:                      atomic.NewUint64(0),
 		subscriptions:              NewSubscriptionTrie(),
-		pubpool:                    pool,
 		logger:                     config.Logger,
 		topicCache:                 xsync.NewMap[string, []*Subscription](),
 		maxCacheSize:               2000, // Increase cache size for better hit rate
 		maxConcurrentSubscriptions: maxConcurrentSubscriptions,
-	}, nil
+		useGoroutinePool:           config.UseGoroutinePool,
+	}
+
+	// Only initialize worker pool if needed
+	if config.UseGoroutinePool {
+		// Optimize pool options for maximum performance
+		options := []ants.Option{
+			ants.WithPanicHandler(func(err any) {
+				typedErr, ok := err.(error)
+				if !ok {
+					return
+				}
+
+				config.Logger.Error(typedErr, "panic in publish pool")
+			}),
+			ants.WithPreAlloc(true), // Always preallocate for better performance
+			ants.WithMaxBlockingTasks(config.MaxBlockingTasks),
+			ants.WithNonblocking(true), // Use non-blocking mode for high performance
+		}
+
+		if config.ExpiryDuration > 0 {
+			options = append(options, ants.WithExpiryDuration(config.ExpiryDuration))
+		}
+
+		// Set a minimum pool size for better performance
+		poolSize := config.WorkerCount
+		if poolSize < 20000 {
+			poolSize = 20000 // Ensure we have enough workers for high throughput
+		}
+
+		pool, err := ants.NewPool(
+			poolSize,
+			options...,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("creating publish pool: %w", err)
+		}
+
+		bus.pubpool = pool
+	}
+
+	return bus, nil
 }
 
 func NewBusWithDefaults() (*Bus, error) {
@@ -99,15 +108,18 @@ const (
 )
 
 func (b *Bus) Close() error {
-	defer b.pubpool.Release()
+	// Only release pool if it exists
+	if b.pubpool != nil {
+		defer b.pubpool.Release()
 
-	startTime := time.Now()
-	for b.pubpool.Waiting() > 0 {
-		if time.Since(startTime) > closeTimeout {
-			return ErrTimeoutClosingBus
+		startTime := time.Now()
+		for b.pubpool.Waiting() > 0 {
+			if time.Since(startTime) > closeTimeout {
+				return ErrTimeoutClosingBus
+			}
+
+			time.Sleep(closeInterval)
 		}
-
-		time.Sleep(closeInterval)
 	}
 
 	return nil
@@ -151,33 +163,59 @@ func (b *Bus) Publish(topic string, payload []byte) {
 	// Fast path for single subscriber (very common case)
 	if subscriberCount == 1 {
 		subscription := matchingSubs[0]
-		// Submit directly without wrapping in a closure when possible
-		_ = b.pubpool.Submit(func() {
-			_ = subscription.receiveMessage(msg)
-		})
+
+		if b.useGoroutinePool {
+			// Use worker pool
+			_ = b.pubpool.Submit(func() {
+				_ = subscription.receiveMessage(msg)
+			})
+		} else {
+			// Use direct goroutine
+			go func() {
+				_ = subscription.receiveMessage(msg)
+			}()
+		}
 		return
 	}
 
-	// For a small number of subscribers, submit them directly
+	// For a small number of subscribers, submit them individually
 	if subscriberCount <= b.maxConcurrentSubscriptions {
 		for _, subscription := range matchingSubs {
 			sub := subscription // Local copy for closure
-			_ = b.pubpool.Submit(func() {
-				_ = sub.receiveMessage(msg)
-			})
+
+			if b.useGoroutinePool {
+				// Use worker pool
+				_ = b.pubpool.Submit(func() {
+					_ = sub.receiveMessage(msg)
+				})
+			} else {
+				// Use direct goroutine
+				go func(s *Subscription) {
+					_ = s.receiveMessage(msg)
+				}(sub)
+			}
 		}
 		return
 	}
 
-	// For larger subscriber sets, batch them to reduce pool overhead
-	// but still use the pool to avoid blocking
-	_ = b.pubpool.Submit(func() {
-		// Process all subscriptions without further overhead
-		for _, subscription := range matchingSubs {
-			// Ignore errors in this fast path
-			_ = subscription.receiveMessage(msg)
-		}
-	})
+	// For larger subscriber sets, batch them to reduce overhead
+	if b.useGoroutinePool {
+		// Use worker pool with batching
+		_ = b.pubpool.Submit(func() {
+			// Process all subscriptions in a single task
+			for _, subscription := range matchingSubs {
+				_ = subscription.receiveMessage(msg)
+			}
+		})
+	} else {
+		// Use a single goroutine for batching
+		go func() {
+			// Process all subscriptions in a single goroutine
+			for _, subscription := range matchingSubs {
+				_ = subscription.receiveMessage(msg)
+			}
+		}()
+	}
 }
 
 // removeSubscription removes a subscription from the trie.

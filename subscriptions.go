@@ -1,10 +1,19 @@
 package blazesub
 
+// Subscription represents a subscription to a topic.
 type Subscription struct {
 	id            uint64
 	topic         string
 	handler       MessageHandler
 	unsubscribeFn func() error
+}
+
+// MessageHandlerFunc is a function type that implements MessageHandler interface
+type MessageHandlerFunc func(message *Message) error
+
+// OnMessage implements MessageHandler interface
+func (f MessageHandlerFunc) OnMessage(message *Message) error {
+	return f(message)
 }
 
 func (s *Subscription) OnMessage(handler MessageHandler) {
