@@ -45,7 +45,6 @@ func NewTopicFilter() TopicFilter {
 	// $                         - End of string
 	//
 	// Note: This regex doesn't fully enforce # only at the end - we'll check that separately
-
 	// Main filter validation regex for general pattern
 	validFilter := regexp.MustCompile(`^(?:[a-z0-9_-]+|\+|#)(?:/(?:[a-z0-9_-]+|\+|#))*$`)
 
@@ -90,7 +89,7 @@ func (f *topicFilter) Validate(filter string) error {
 	return nil
 }
 
-// ValidateTopic validates a topic string (no wildcards allowed)
+// ValidateTopic validates a topic string (no wildcards allowed).
 func (f *topicFilter) ValidateTopic(topic string) error {
 	// Convert to lowercase for validation
 	lowercaseTopic := strings.ToLower(topic)

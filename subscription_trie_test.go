@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// mockHandler is a minimal implementation of MessageHandler for testing
+// mockHandler is a minimal implementation of MessageHandler for testing.
 type mockHandler struct {
 	messageReceived bool
 	mutex           sync.Mutex
@@ -130,7 +130,7 @@ func TestUnsubscribe(t *testing.T) {
 	}
 }
 
-// Rest of the test cases remain similar but with removed references to bus
+// Rest of the test cases remain similar but with removed references to bus.
 func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 	trie := NewSubscriptionTrie()
 	handler := &mockHandler{
@@ -155,6 +155,7 @@ func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 	for _, sub := range matches {
 		ids[sub.ID()] = true
 	}
+
 	if !ids[1] || !ids[2] {
 		t.Fatalf("Expected to find subscriptions 1 and 2, but found: %v", ids)
 	}
@@ -164,6 +165,7 @@ func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatalf("Expected 1 matching subscription for #, got %d", len(matches))
 	}
+
 	if matches[0].ID() != 2 { // Should only match "test/#"
 		t.Fatalf("Expected subscription ID 2, got %d", matches[0].ID())
 	}
@@ -179,6 +181,7 @@ func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 	for _, sub := range matches {
 		ids[sub.ID()] = true
 	}
+
 	if !ids[2] || !ids[4] {
 		t.Fatalf("Expected to find subscriptions 2 and 4, but found: %v", ids)
 	}
@@ -262,8 +265,9 @@ func TestConcurrentAccess(t *testing.T) {
 	numOperations := 100
 
 	// Add subscriptions concurrently
-	for i := 0; i < numOperations; i++ {
+	for i := range numOperations {
 		wg.Add(1)
+
 		go func(id uint64) {
 			defer wg.Done()
 			trie.Subscribe(id, "concurrent/topic", handler)
@@ -283,8 +287,9 @@ func TestConcurrentAccess(t *testing.T) {
 	wg = sync.WaitGroup{}
 
 	// Start removing subscriptions
-	for i := 0; i < numOperations/2; i++ {
+	for i := range numOperations / 2 {
 		wg.Add(1)
+
 		go func(id uint64) {
 			defer wg.Done()
 			trie.Unsubscribe("concurrent/topic", id)
@@ -293,11 +298,15 @@ func TestConcurrentAccess(t *testing.T) {
 
 	// Concurrently find matches
 	var findResults []int
+
 	var findMutex sync.Mutex
-	for i := 0; i < 10; i++ {
+
+	for range 10 {
 		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
+
 			matches := trie.FindMatchingSubscriptions("concurrent/topic")
 
 			findMutex.Lock()
@@ -414,12 +423,15 @@ func TestEmptySegments(t *testing.T) {
 	for _, tc := range testCases {
 		matches := trie.FindMatchingSubscriptions(tc.topic)
 		found := false
+
 		for _, match := range matches {
 			if tc.expected && match.ID() == tc.subID {
 				found = true
+
 				break
 			}
 		}
+
 		if found != tc.expected {
 			if tc.expected {
 				t.Fatalf("Topic '%s': Expected to find subscription %d but didn't", tc.topic, tc.subID)
@@ -447,6 +459,7 @@ func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
 	for i := uint64(1); i <= 10; i++ {
 		topic := "test/topic" + string(rune('0'+i))
 		matches := trie.FindMatchingSubscriptions(topic)
+
 		if len(matches) != 1 {
 			t.Fatalf("Expected 1 match for topic %s, got %d", topic, len(matches))
 		}
@@ -483,7 +496,8 @@ func BenchmarkSubscribe(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := range b.N {
 		trie.Subscribe(uint64(i), "benchmark/topic", handler)
 	}
 }
@@ -502,7 +516,8 @@ func BenchmarkFindMatchingSubscriptions(b *testing.B) {
 	trie.Subscribe(4, "benchmark/#", handler)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for range b.N {
 		trie.FindMatchingSubscriptions("benchmark/topic")
 	}
 }
@@ -515,12 +530,13 @@ func BenchmarkUnsubscribe(b *testing.B) {
 	}
 
 	// Pre-populate
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		trie.Subscribe(uint64(i), "benchmark/topic", handler)
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := range b.N {
 		trie.Unsubscribe("benchmark/topic", uint64(i))
 	}
 }
@@ -543,7 +559,8 @@ func BenchmarkWildcardMatching(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for i := range b.N {
 		// Test matching against different topics in rotation
 		topic := "a/b/c"
 		if i%3 == 1 {
@@ -551,15 +568,18 @@ func BenchmarkWildcardMatching(b *testing.B) {
 		} else if i%3 == 2 {
 			topic = "new/different/topic"
 		}
+
 		trie.FindMatchingSubscriptions(topic)
 	}
 }
 
-// BenchmarkTrieVsMapVsLinearSearch compares trie performance against a map lookup and a brute force linear search
+// BenchmarkTrieVsMapVsLinearSearch compares trie performance against a map lookup and a brute force linear search.
 func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	// Generate test data
 	const numTopics = 1000
+
 	const numSubscriptions = 5000
+
 	const numWildcards = 500
 
 	// Create implementations
@@ -573,13 +593,14 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 
 	// Generate subscriptions with a mix of exact matches and wildcards
 	topics := make([]string, 0, numTopics)
-	for i := 0; i < numTopics; i++ {
+
+	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
 	}
 
 	// Add subscriptions to all implementations
-	for i := 0; i < numSubscriptions-numWildcards; i++ {
+	for i := range numSubscriptions - numWildcards {
 		topicIndex := i % numTopics
 		topic := topics[topicIndex]
 
@@ -591,7 +612,7 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	}
 
 	// Add wildcard subscriptions (only for trie and linear search)
-	for i := 0; i < numWildcards; i++ {
+	for i := range numWildcards {
 		var topic string
 		if i%2 == 0 {
 			// + wildcard
@@ -600,9 +621,9 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 			// # wildcard
 			topic = fmt.Sprintf("test/topic/%d/#", i%50)
 		}
+
 		subscription := trie.Subscribe(uint64(numSubscriptions-numWildcards+i), topic, handler)
 		linearSubscriptions = append(linearSubscriptions, subscription)
-
 		// Note: We don't add wildcards to the map since we're measuring exact match performance
 	}
 
@@ -624,11 +645,13 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	// Linear search function that simulates basic topic matching without a trie
 	linearSearch := func(topic string) []*Subscription {
 		results := make([]*Subscription, 0)
+
 		for _, sub := range linearSubscriptions {
 			if matchTopic(sub.Topic(), topic) {
 				results = append(results, sub)
 			}
 		}
+
 		return results
 	}
 
@@ -640,7 +663,8 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	// Benchmark trie lookup
 	b.Run("Trie", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = trie.FindMatchingSubscriptions(topic)
 		}
@@ -649,7 +673,8 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	// Benchmark map lookup (fastest possible, but no wildcard support)
 	b.Run("Map", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = mapLookup(topic)
 		}
@@ -658,17 +683,19 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	// Benchmark linear search
 	b.Run("LinearSearch", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = linearSearch(topic)
 		}
 	})
 }
 
-// BenchmarkTrieVsMapExactMatchOnly compares trie performance against map lookup for exact matches only
+// BenchmarkTrieVsMapExactMatchOnly compares trie performance against map lookup for exact matches only.
 func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 	// Generate test data for exact matches only
 	const numTopics = 1000
+
 	const numSubscriptions = 5000
 
 	// Create implementations
@@ -681,13 +708,14 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
-	for i := 0; i < numTopics; i++ {
+
+	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
 	}
 
 	// Add exact match subscriptions to both implementations
-	for i := 0; i < numSubscriptions; i++ {
+	for i := range numSubscriptions {
 		topicIndex := i % numTopics
 		topic := topics[topicIndex]
 
@@ -709,7 +737,8 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 	// Benchmark trie lookup (exact matches only)
 	b.Run("TrieExactOnly", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = trie.FindMatchingSubscriptions(topic)
 		}
@@ -718,15 +747,15 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 	// Benchmark map lookup
 	b.Run("Map", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+
+		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = mapLookup(topic)
 		}
 	})
 }
 
-// matchTopic is a simple helper function that checks if a subscription matches a topic
-// This simulates how a basic non-trie implementation would match topics
+// This simulates how a basic non-trie implementation would match topics.
 func matchTopic(filter, topic string) bool {
 	// Split topic and filter into segments
 	topicSegments := strings.Split(topic, "/")
@@ -746,7 +775,7 @@ func matchTopic(filter, topic string) bool {
 	}
 
 	// Check each segment
-	for i := 0; i < len(filterSegments); i++ {
+	for i := range len(filterSegments) {
 		if filterSegments[i] != "+" && filterSegments[i] != topicSegments[i] {
 			return false
 		}
@@ -755,7 +784,7 @@ func matchTopic(filter, topic string) bool {
 	return true
 }
 
-// BenchmarkTrieWithDifferentWildcardDensities measures how wildcards affect performance
+// BenchmarkTrieWithDifferentWildcardDensities measures how wildcards affect performance.
 func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 	handler := &mockHandler{
 		messageReceived: false,
@@ -768,6 +797,7 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 	for _, wildcardPercentage := range densities {
 		b.Run(fmt.Sprintf("Wildcards_%d%%", wildcardPercentage), func(b *testing.B) {
 			trie := NewSubscriptionTrie()
+
 			const totalSubs = 1000
 
 			// Calculate how many wildcard subscriptions to add
@@ -775,13 +805,13 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 			normalCount := totalSubs - wildcardCount
 
 			// Add normal subscriptions
-			for i := 0; i < normalCount; i++ {
+			for i := range normalCount {
 				topic := fmt.Sprintf("test/topic/%d/exact/%d", i%100, i%10)
 				trie.Subscribe(uint64(i), topic, handler)
 			}
 
 			// Add wildcard subscriptions
-			for i := 0; i < wildcardCount; i++ {
+			for i := range wildcardCount {
 				var topic string
 				if i%3 == 0 {
 					// Single + wildcard
@@ -793,6 +823,7 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 					// # wildcard
 					topic = fmt.Sprintf("test/topic/%d/#", i%50)
 				}
+
 				trie.Subscribe(uint64(normalCount+i), topic, handler)
 			}
 
@@ -803,7 +834,8 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 			}
 
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+
+			for i := range b.N {
 				topic := testTopics[i%len(testTopics)]
 				_ = trie.FindMatchingSubscriptions(topic)
 			}
@@ -811,15 +843,16 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 	}
 }
 
-// BenchmarkTrieVsLinearSearch redirects to BenchmarkTrieVsMapVsLinearSearch for backward compatibility
+// BenchmarkTrieVsLinearSearch redirects to BenchmarkTrieVsMapVsLinearSearch for backward compatibility.
 func BenchmarkTrieVsLinearSearch(b *testing.B) {
 	BenchmarkTrieVsMapVsLinearSearch(b)
 }
 
-// BenchmarkTrieVsMapMixedLookups compares trie and map performance with varying percentages of wildcard matches
+// BenchmarkTrieVsMapMixedLookups compares trie and map performance with varying percentages of wildcard matches.
 func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 	// Setup same test data across all test cases
 	const numTopics = 1000
+
 	const numSubscriptions = 5000
 
 	handler := &mockHandler{
@@ -829,7 +862,8 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
-	for i := 0; i < numTopics; i++ {
+
+	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
 	}
@@ -861,7 +895,7 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 			mapSubscriptions := make(map[string][]*Subscription)
 
 			// Add exact match subscriptions to both implementations
-			for i := 0; i < numSubscriptions; i++ {
+			for i := range numSubscriptions {
 				topicIndex := i % numTopics
 				topic := topics[topicIndex]
 
@@ -894,7 +928,8 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 			// Benchmark trie lookup
 			b.Run("Trie", func(b *testing.B) {
 				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
+
+				for i := range b.N {
 					topic := testTopics[i%len(testTopics)]
 					_ = trie.FindMatchingSubscriptions(topic)
 				}
@@ -903,7 +938,8 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 			// Benchmark map lookup
 			b.Run("Map", func(b *testing.B) {
 				b.ResetTimer()
-				for i := 0; i < b.N; i++ {
+
+				for i := range b.N {
 					topic := testTopics[i%len(testTopics)]
 					_ = mapLookup(topic)
 				}

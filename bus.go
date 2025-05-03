@@ -67,7 +67,7 @@ func (b *Bus) Close() error {
 	return nil
 }
 
-// Publish publishes a message to subscribers of the specified topic
+// Publish publishes a message to subscribers of the specified topic.
 func (b *Bus) Publish(topic string, payload []byte) {
 	msg := &Message{
 		Topic:        topic,
@@ -83,6 +83,7 @@ func (b *Bus) Publish(topic string, payload []byte) {
 	// Submit a task to the pool for each subscription
 	for _, sub := range matchingSubs {
 		subscription := sub // Create a local copy for the closure
+
 		if err := b.pubpool.Submit(func() {
 			if err := subscription.receiveMessage(msg); err != nil {
 				fmt.Printf("error receiving message: %s", err)
@@ -93,7 +94,7 @@ func (b *Bus) Publish(topic string, payload []byte) {
 	}
 }
 
-// removeSubscription removes a subscription from the trie
+// removeSubscription removes a subscription from the trie.
 func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
 	b.subLock.Lock()
 	defer b.subLock.Unlock()
@@ -101,7 +102,7 @@ func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
 	b.subscriptions.Unsubscribe(topic, subscriptionID)
 }
 
-// Subscribe creates a new subscription for the specified topic
+// Subscribe creates a new subscription for the specified topic.
 func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	subID := b.subID.Add(1)
 
@@ -114,6 +115,7 @@ func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	// Set up unsubscribe function
 	unsubscribeFn := func() error {
 		b.removeSubscription(topic, subID)
+
 		return nil
 	}
 	subscription.SetUnsubscribeFunc(unsubscribeFn)
@@ -121,7 +123,7 @@ func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	return subscription, nil
 }
 
-// addSubscriptionToTrie adds a subscription to the trie
+// addSubscriptionToTrie adds a subscription to the trie.
 func (b *Bus) addSubscriptionToTrie(subscription *Subscription) {
 	topic := subscription.Topic()
 	segments := strings.Split(topic, "/")

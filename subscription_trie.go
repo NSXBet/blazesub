@@ -6,10 +6,10 @@ import (
 	"sync/atomic"
 )
 
-// DefaultExactMatchesCapacity is the default pre-allocation capacity for the exact matches map
+// DefaultExactMatchesCapacity is the default pre-allocation capacity for the exact matches map.
 const DefaultExactMatchesCapacity = 1024
 
-// TrieNode represents a node in the subscription trie
+// TrieNode represents a node in the subscription trie.
 type TrieNode struct {
 	segment       string
 	children      map[string]*TrieNode
@@ -17,7 +17,7 @@ type TrieNode struct {
 	mutex         sync.RWMutex             // For concurrency safety
 }
 
-// SubscriptionTrie is a trie-based structure for efficient topic subscriptions
+// SubscriptionTrie is a trie-based structure for efficient topic subscriptions.
 type SubscriptionTrie struct {
 	root            *TrieNode
 	exactMatches    map[string]map[uint64]*Subscription // Fast map for exact match topics
@@ -25,7 +25,7 @@ type SubscriptionTrie struct {
 	wildcardCount   atomic.Uint32                       // Counter for wildcard subscriptions
 }
 
-// NewSubscriptionTrie creates a new subscription trie
+// NewSubscriptionTrie creates a new subscription trie.
 func NewSubscriptionTrie() *SubscriptionTrie {
 	st := &SubscriptionTrie{
 		root: &TrieNode{
@@ -44,12 +44,12 @@ func NewSubscriptionTrie() *SubscriptionTrie {
 	return st
 }
 
-// hasWildcard checks if a subscription pattern contains wildcard characters
+// hasWildcard checks if a subscription pattern contains wildcard characters.
 func hasWildcard(pattern string) bool {
 	return strings.ContainsAny(pattern, "+#")
 }
 
-// Subscribe adds a subscription for a topic pattern
+// Subscribe adds a subscription for a topic pattern.
 func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler MessageHandler) *Subscription {
 	// Create a new subscription
 	subscription := &Subscription{
@@ -116,7 +116,7 @@ func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler Messag
 	return subscription
 }
 
-// Unsubscribe removes a subscription for a topic pattern
+// Unsubscribe removes a subscription for a topic pattern.
 func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 	isWildcard := hasWildcard(topic)
 
@@ -175,7 +175,7 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 	}
 }
 
-// cleanupEmptyNodes removes nodes that have no subscriptions and no children
+// cleanupEmptyNodes removes nodes that have no subscriptions and no children.
 func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
 	for i := len(nodePath) - 1; i >= 0; i-- {
 		parentNode := nodePath[i]
@@ -191,7 +191,7 @@ func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
 	}
 }
 
-// findMatches recursively finds all matching subscriptions for a topic
+// findMatches recursively finds all matching subscriptions for a topic.
 func findMatches(node *TrieNode, segments []string, index int, result map[uint64]*Subscription) {
 	// If we've reached a "#" node, it matches everything at this level and below
 	if wildcard, exists := node.children["#"]; exists {
@@ -224,7 +224,7 @@ func findMatches(node *TrieNode, segments []string, index int, result map[uint64
 	}
 }
 
-// FindMatchingSubscriptions returns all subscriptions that match a given topic
+// FindMatchingSubscriptions returns all subscriptions that match a given topic.
 func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscription {
 	// Create a map to hold results (to avoid duplicates)
 	resultMap := make(map[uint64]*Subscription)

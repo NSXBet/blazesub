@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// BenchmarkWildcardLookupFrequency benchmarks the impact of different wildcard lookup frequencies
+// BenchmarkWildcardLookupFrequency benchmarks the impact of different wildcard lookup frequencies.
 func BenchmarkWildcardLookupFrequency(b *testing.B) {
 	// Test with different frequencies of wildcard lookups
 	frequencies := []int{0, 25, 50, 75, 100}
@@ -36,6 +36,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 				} else {
 					topic = fmt.Sprintf("test/topic/%d/#", i)
 				}
+
 				trie.Subscribe(uint64(1000+i), topic, handler)
 			}
 
@@ -61,7 +62,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 	}
 }
 
-// BenchmarkWildcardCounter measures how the atomic counter affects concurrent performance
+// BenchmarkWildcardCounter measures how the atomic counter affects concurrent performance.
 func BenchmarkWildcardCounter(b *testing.B) {
 	// Create a trie with some subscriptions
 	trie := NewSubscriptionTrie()
@@ -84,6 +85,7 @@ func BenchmarkWildcardCounter(b *testing.B) {
 		} else {
 			topic = fmt.Sprintf("test/topic/%d/#", i)
 		}
+
 		trie.Subscribe(uint64(1000+i), topic, handler)
 	}
 
@@ -101,6 +103,7 @@ func BenchmarkWildcardCounter(b *testing.B) {
 		b.ResetTimer()
 		b.RunParallel(func(pb *testing.PB) {
 			counter := 0
+
 			for pb.Next() {
 				var topic string
 				if counter%2 == 0 {
@@ -108,6 +111,7 @@ func BenchmarkWildcardCounter(b *testing.B) {
 				} else {
 					topic = wildcardTopics[counter%50]
 				}
+
 				counter++
 				_ = trie.FindMatchingSubscriptions(topic)
 			}

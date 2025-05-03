@@ -91,6 +91,7 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 			require.NoError(t, err)
 
 			messageHandler := SpyMessageHandler(t)
+
 			for _, topic := range c.subscribe {
 				subscription, err := bus.Subscribe(topic)
 				require.NoError(t, err)
@@ -113,6 +114,7 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 					messageHandler.MessagesReceived()[pair.topic],
 					len(c.want[pair.topic]),
 				)
+
 				for i, payload := range c.want[pair.topic] {
 					require.Equal(
 						t,
@@ -159,7 +161,7 @@ func TestSlowMessageHandler(t *testing.T) {
 		return len(slowHandler.MessagesReceived()["test"]) == 1
 	}, time.Second, time.Millisecond*10)
 
-	require.Equal(t, 1, len(slowHandler.MessagesReceived()["test"]))
+	require.Len(t, slowHandler.MessagesReceived()["test"], 1)
 	require.Equal(t, []byte("test-data"), slowHandler.MessagesReceived()["test"][0].Data)
 }
 
@@ -257,7 +259,7 @@ func BenchmarkPublishAndSubscribeWithWildcards_To_Multiple_Subscribers(b *testin
 	}
 }
 
-// TestBusUnsubscribe tests that unsubscribing from the bus properly removes subscriptions
+// TestBusUnsubscribe tests that unsubscribing from the bus properly removes subscriptions.
 func TestBusUnsubscribe(t *testing.T) {
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
@@ -293,15 +295,17 @@ func TestBusUnsubscribe(t *testing.T) {
 	require.Equal(t, []byte("test-data"), handler.MessagesReceived()["test/topic"][0].Data)
 }
 
-// TestBusMultipleUnsubscribe tests unsubscribing multiple subscriptions
+// TestBusMultipleUnsubscribe tests unsubscribing multiple subscriptions.
 func TestBusMultipleUnsubscribe(t *testing.T) {
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
 	// Create several subscriptions
 	handler := SpyMessageHandler(t)
+
 	var subscriptions []*blazesub.Subscription
-	for i := 0; i < 5; i++ {
+
+	for i := range 5 {
 		topic := fmt.Sprintf("test/topic/%d", i)
 		subscription, err := bus.Subscribe(topic)
 		require.NoError(t, err)
@@ -310,7 +314,7 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	}
 
 	// Publish to all topics
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		topic := fmt.Sprintf("test/topic/%d", i)
 		bus.Publish(topic, []byte(fmt.Sprintf("data-%d", i)))
 	}
@@ -318,10 +322,12 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	// Wait for all messages
 	require.Eventually(t, func() bool {
 		count := 0
-		for i := 0; i < 5; i++ {
+
+		for i := range 5 {
 			topic := fmt.Sprintf("test/topic/%d", i)
 			count += len(handler.MessagesReceived()[topic])
 		}
+
 		return count == 5
 	}, time.Second, time.Millisecond*10)
 
@@ -335,7 +341,7 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	handler.Reset()
 
 	// Publish to all topics again
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		topic := fmt.Sprintf("test/topic/%d", i)
 		bus.Publish(topic, []byte(fmt.Sprintf("data-%d-after", i)))
 	}
@@ -344,8 +350,9 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	time.Sleep(time.Millisecond * 50)
 
 	// Check that we only received messages for even-numbered topics (0, 2, 4)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		topic := fmt.Sprintf("test/topic/%d", i)
+
 		if i%2 == 0 { // Even topics should have messages
 			require.Eventually(t, func() bool {
 				return len(handler.MessagesReceived()[topic]) == 1
@@ -357,7 +364,7 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	}
 }
 
-// TestBusWildcardUnsubscribe tests unsubscribing from wildcard topics
+// TestBusWildcardUnsubscribe tests unsubscribing from wildcard topics.
 func TestBusWildcardUnsubscribe(t *testing.T) {
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
@@ -435,7 +442,7 @@ func TestBusWildcardUnsubscribe(t *testing.T) {
 	require.Empty(t, handler2.MessagesReceived())
 }
 
-// TestBusUnsubscribePerformance tests the performance impact of frequent subscribe/unsubscribe operations
+// TestBusUnsubscribePerformance tests the performance impact of frequent subscribe/unsubscribe operations.
 func TestBusUnsubscribePerformance(t *testing.T) {
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
@@ -445,9 +452,10 @@ func TestBusUnsubscribePerformance(t *testing.T) {
 
 	// Measure time to create 1000 subscriptions
 	startSubscribe := time.Now()
+
 	var subscriptions []*blazesub.Subscription
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		topic := fmt.Sprintf("test/topic/%d", i%100) // 100 unique topics
 		sub, err := bus.Subscribe(topic)
 		require.NoError(t, err)
@@ -459,20 +467,24 @@ func TestBusUnsubscribePerformance(t *testing.T) {
 
 	// Measure time to unsubscribe from all subscriptions
 	startUnsubscribe := time.Now()
+
 	for _, sub := range subscriptions {
 		err := sub.Unsubscribe()
 		require.NoError(t, err)
 	}
+
 	unsubscribeTime := time.Since(startUnsubscribe)
 
 	// Resubscribe to the same topics
 	startResubscribe := time.Now()
-	for i := 0; i < 1000; i++ {
+
+	for i := range 1000 {
 		topic := fmt.Sprintf("test/topic/%d", i%100)
 		sub, err := bus.Subscribe(topic)
 		require.NoError(t, err)
 		sub.OnMessage(handler)
 	}
+
 	resubscribeTime := time.Since(startResubscribe)
 
 	// Log performance metrics

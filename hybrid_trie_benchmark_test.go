@@ -7,10 +7,11 @@ import (
 	"testing"
 )
 
-// BenchmarkHybridTrieExactMatch benchmarks the performance of the hybrid trie for exact match lookups
+// BenchmarkHybridTrieExactMatch benchmarks the performance of the hybrid trie for exact match lookups.
 func BenchmarkHybridTrieExactMatch(b *testing.B) {
 	// Generate test data for exact matches only
 	const numTopics = 1000
+
 	const numSubscriptions = 5000
 
 	// Create test implementation
@@ -22,6 +23,7 @@ func BenchmarkHybridTrieExactMatch(b *testing.B) {
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
+
 	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
@@ -41,16 +43,18 @@ func BenchmarkHybridTrieExactMatch(b *testing.B) {
 	}
 
 	b.ResetTimer()
+
 	for i := range b.N {
 		topic := testTopics[i%len(testTopics)]
 		_ = trie.FindMatchingSubscriptions(topic)
 	}
 }
 
-// BenchmarkHybridVsOriginalTrie compares our hybrid implementation to a version without the exactMatches optimization
+// BenchmarkHybridVsOriginalTrie compares our hybrid implementation to a version without the exactMatches optimization.
 func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 	// Create data shared across both benchmarks
 	const numTopics = 1000
+
 	const numSubscriptions = 5000
 
 	handler := &mockHandler{
@@ -60,6 +64,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
+
 	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
@@ -83,6 +88,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 		}
 
 		b.ResetTimer()
+
 		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 			_ = trie.FindMatchingSubscriptions(topic)
@@ -120,6 +126,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 
 			// Manually add to trie (simulating original behavior)
 			segments := strings.Split(topic, "/")
+
 			trie.root.mutex.Lock()
 			currentNode := trie.root
 
@@ -148,12 +155,14 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 		}
 
 		b.ResetTimer()
+
 		for i := range b.N {
 			topic := testTopics[i%len(testTopics)]
 
 			// Manually emulate the original FindMatchingSubscriptions
 			resultMap := make(map[uint64]*Subscription)
 			segments := strings.Split(topic, "/")
+
 			trie.root.mutex.RLock()
 			findMatches(trie.root, segments, 0, resultMap)
 			trie.root.mutex.RUnlock()
@@ -168,10 +177,11 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 	})
 }
 
-// BenchmarkMixedWorkload benchmarks the hybrid trie with a mix of exact and wildcard lookups
+// BenchmarkMixedWorkload benchmarks the hybrid trie with a mix of exact and wildcard lookups.
 func BenchmarkMixedWorkload(b *testing.B) {
 	// Generate test data
 	const numTopics = 1000
+
 	const numSubscriptions = 5000
 	// Commented out to fix unused const error
 	// const numWildcardSubs = 50
@@ -185,6 +195,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
+
 	for i := range numTopics {
 		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
 		topics = append(topics, topic)
@@ -223,6 +234,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 	}
 
 	b.ResetTimer()
+
 	for i := range b.N {
 		topic := testTopics[i%len(testTopics)]
 		_ = trie.FindMatchingSubscriptions(topic)

@@ -228,7 +228,7 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 	}
 }
 
-// TestUnsubscribeMaintainsMemory tests to see if the unsubscribe function correctly cleans up memory
+// TestUnsubscribeMaintainsMemory tests to see if the unsubscribe function correctly cleans up memory.
 func TestUnsubscribeMaintainsMemory(t *testing.T) {
 	handler := &mockHandler{
 		messageReceived: false,
@@ -273,7 +273,7 @@ func TestUnsubscribeMaintainsMemory(t *testing.T) {
 	}
 }
 
-// TestResubscribePerformance tests the performance implications of unsubscribing and resubscribing
+// TestResubscribePerformance tests the performance implications of unsubscribing and resubscribing.
 func TestResubscribePerformance(t *testing.T) {
 	handler := &mockHandler{
 		messageReceived: false,
@@ -308,6 +308,7 @@ func TestResubscribePerformance(t *testing.T) {
 	for i := uint64(1); i <= 100; i++ {
 		topic := "test/topic/" + strconv.FormatUint(i, 10)
 		matches := trie.FindMatchingSubscriptions(topic)
+
 		if len(matches) != 1 {
 			t.Fatalf("Expected 1 match for resubscribed topic %s, got %d", topic, len(matches))
 		}

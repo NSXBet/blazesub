@@ -40,7 +40,7 @@ func (h *SpyHandler) SetDelay(delay time.Duration) {
 	h.delay = delay
 }
 
-// Reset clears all stored messages
+// Reset clears all stored messages.
 func (h *SpyHandler) Reset() {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
