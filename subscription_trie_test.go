@@ -509,16 +509,17 @@ func BenchmarkWildcardMatching(b *testing.B) {
 	}
 }
 
-// BenchmarkTrieVsLinearSearch compares trie performance against a brute force linear search
-func BenchmarkTrieVsLinearSearch(b *testing.B) {
+// BenchmarkTrieVsMapVsLinearSearch compares trie performance against a map lookup and a brute force linear search
+func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	// Generate test data
 	const numTopics = 1000
 	const numSubscriptions = 5000
 	const numWildcards = 500
 
-	// Create both implementations
+	// Create implementations
 	trie := NewSubscriptionTrie()
 	linearSubscriptions := make([]*Subscription, 0, numSubscriptions)
+	mapSubscriptions := make(map[string][]*Subscription) // Direct map for fastest possible lookup
 	handler := &mockHandler{}
 
 	// Generate subscriptions with a mix of exact matches and wildcards
@@ -528,14 +529,19 @@ func BenchmarkTrieVsLinearSearch(b *testing.B) {
 		topics = append(topics, topic)
 	}
 
-	// Add subscriptions to both implementations
+	// Add subscriptions to all implementations
 	for i := 0; i < numSubscriptions-numWildcards; i++ {
 		topicIndex := i % numTopics
-		subscription := trie.Subscribe(uint64(i), topics[topicIndex], handler)
+		topic := topics[topicIndex]
+
+		subscription := trie.Subscribe(uint64(i), topic, handler)
 		linearSubscriptions = append(linearSubscriptions, subscription)
+
+		// Add to map (direct lookup)
+		mapSubscriptions[topic] = append(mapSubscriptions[topic], subscription)
 	}
 
-	// Add wildcard subscriptions
+	// Add wildcard subscriptions (only for trie and linear search)
 	for i := 0; i < numWildcards; i++ {
 		var topic string
 		if i%2 == 0 {
@@ -547,13 +553,15 @@ func BenchmarkTrieVsLinearSearch(b *testing.B) {
 		}
 		subscription := trie.Subscribe(uint64(numSubscriptions-numWildcards+i), topic, handler)
 		linearSubscriptions = append(linearSubscriptions, subscription)
+
+		// Note: We don't add wildcards to the map since we're measuring exact match performance
 	}
 
 	// Create a list of test topics to lookup
 	testTopics := make([]string, 100)
 	for i := 0; i < len(testTopics); i++ {
 		if i < 50 {
-			// Existing topics
+			// Existing topics for exact match
 			testTopics[i] = topics[i*10]
 		} else if i < 75 {
 			// Topics that should match wildcards
@@ -575,6 +583,11 @@ func BenchmarkTrieVsLinearSearch(b *testing.B) {
 		return results
 	}
 
+	// Map lookup function - fastest possible for exact matches
+	mapLookup := func(topic string) []*Subscription {
+		return mapSubscriptions[topic] // This will be nil if not found
+	}
+
 	// Benchmark trie lookup
 	b.Run("Trie", func(b *testing.B) {
 		b.ResetTimer()
@@ -584,12 +597,78 @@ func BenchmarkTrieVsLinearSearch(b *testing.B) {
 		}
 	})
 
+	// Benchmark map lookup (fastest possible, but no wildcard support)
+	b.Run("Map", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			topic := testTopics[i%len(testTopics)]
+			_ = mapLookup(topic)
+		}
+	})
+
 	// Benchmark linear search
 	b.Run("LinearSearch", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			topic := testTopics[i%len(testTopics)]
 			_ = linearSearch(topic)
+		}
+	})
+}
+
+// BenchmarkTrieVsMapExactMatchOnly compares trie performance against map lookup for exact matches only
+func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
+	// Generate test data for exact matches only
+	const numTopics = 1000
+	const numSubscriptions = 5000
+
+	// Create implementations
+	trie := NewSubscriptionTrie()
+	mapSubscriptions := make(map[string][]*Subscription) // Direct map
+	handler := &mockHandler{}
+
+	// Generate topics
+	topics := make([]string, 0, numTopics)
+	for i := 0; i < numTopics; i++ {
+		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
+		topics = append(topics, topic)
+	}
+
+	// Add exact match subscriptions to both implementations
+	for i := 0; i < numSubscriptions; i++ {
+		topicIndex := i % numTopics
+		topic := topics[topicIndex]
+
+		subscription := trie.Subscribe(uint64(i), topic, handler)
+		mapSubscriptions[topic] = append(mapSubscriptions[topic], subscription)
+	}
+
+	// Create test topics (all exact matches)
+	testTopics := make([]string, 100)
+	for i := 0; i < len(testTopics); i++ {
+		testTopics[i] = topics[i%numTopics]
+	}
+
+	// Map lookup function
+	mapLookup := func(topic string) []*Subscription {
+		return mapSubscriptions[topic]
+	}
+
+	// Benchmark trie lookup (exact matches only)
+	b.Run("TrieExactOnly", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			topic := testTopics[i%len(testTopics)]
+			_ = trie.FindMatchingSubscriptions(topic)
+		}
+	})
+
+	// Benchmark map lookup
+	b.Run("Map", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			topic := testTopics[i%len(testTopics)]
+			_ = mapLookup(topic)
 		}
 	})
 }
@@ -673,6 +752,104 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 				topic := testTopics[i%len(testTopics)]
 				_ = trie.FindMatchingSubscriptions(topic)
 			}
+		})
+	}
+}
+
+// BenchmarkTrieVsLinearSearch redirects to BenchmarkTrieVsMapVsLinearSearch for backward compatibility
+func BenchmarkTrieVsLinearSearch(b *testing.B) {
+	BenchmarkTrieVsMapVsLinearSearch(b)
+}
+
+// BenchmarkTrieVsMapMixedLookups compares trie and map performance with varying percentages of wildcard matches
+func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
+	// Setup same test data across all test cases
+	const numTopics = 1000
+	const numSubscriptions = 5000
+
+	handler := &mockHandler{}
+
+	// Generate topics
+	topics := make([]string, 0, numTopics)
+	for i := 0; i < numTopics; i++ {
+		topic := fmt.Sprintf("test/topic/%d/level/%d", i%100, i%10)
+		topics = append(topics, topic)
+	}
+
+	// Generate wildcard patterns
+	wildcardPatterns := []string{
+		"test/+/0/level/0",
+		"test/topic/+/level/+",
+		"test/topic/0/#",
+		"test/#",
+	}
+
+	// Create test cases with different proportions of wildcard lookups
+	testCases := []struct {
+		name               string
+		wildcardPercentage int
+	}{
+		{"0%_Wildcards", 0},
+		{"25%_Wildcards", 25},
+		{"50%_Wildcards", 50},
+		{"75%_Wildcards", 75},
+		{"100%_Wildcards", 100},
+	}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			// Create fresh implementations for each test case
+			trie := NewSubscriptionTrie()
+			mapSubscriptions := make(map[string][]*Subscription)
+
+			// Add exact match subscriptions to both implementations
+			for i := 0; i < numSubscriptions; i++ {
+				topicIndex := i % numTopics
+				topic := topics[topicIndex]
+
+				subscription := trie.Subscribe(uint64(i), topic, handler)
+				mapSubscriptions[topic] = append(mapSubscriptions[topic], subscription)
+			}
+
+			// Add wildcard subscriptions (only to the trie)
+			for i, pattern := range wildcardPatterns {
+				trie.Subscribe(uint64(numSubscriptions+i), pattern, handler)
+			}
+
+			// Create test topics with the specified percentage of wildcard matches
+			testTopics := make([]string, 100)
+			for i := 0; i < len(testTopics); i++ {
+				if i < (100 - tc.wildcardPercentage) {
+					// Exact match topics
+					testTopics[i] = topics[i%numTopics]
+				} else {
+					// Create topics that match wildcards but aren't in the map
+					testTopics[i] = fmt.Sprintf("test/wildcard/%d/level/%d", i%10, i%5)
+				}
+			}
+
+			// Map lookup function
+			mapLookup := func(topic string) []*Subscription {
+				return mapSubscriptions[topic]
+			}
+
+			// Benchmark trie lookup
+			b.Run("Trie", func(b *testing.B) {
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					topic := testTopics[i%len(testTopics)]
+					_ = trie.FindMatchingSubscriptions(topic)
+				}
+			})
+
+			// Benchmark map lookup
+			b.Run("Map", func(b *testing.B) {
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					topic := testTopics[i%len(testTopics)]
+					_ = mapLookup(topic)
+				}
+			})
 		})
 	}
 }
