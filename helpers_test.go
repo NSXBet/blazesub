@@ -39,10 +39,16 @@ func (h *SpyHandler) OnMessage(message *blazesub.Message) error {
 }
 
 func (h *SpyHandler) MessagesReceived() map[string][]*blazesub.Message {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
 	return h.Messages
 }
 
 func (h *SpyHandler) SetDelay(delay time.Duration) {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
 	h.delay = delay
 }
 

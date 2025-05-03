@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/puzpuzpuz/xsync/v4"
 )
 
 type mockHandler struct {
@@ -117,11 +119,9 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 		trie := &SubscriptionTrie{
 			root: &TrieNode{
 				segment:       "",
-				children:      make(map[string]*TrieNode),
-				subscriptions: make(map[uint64]*Subscription),
-				mutex:         sync.RWMutex{},
+				children:      xsync.NewMap[string, *TrieNode](),
+				subscriptions: xsync.NewMap[uint64, *Subscription](),
 			},
-			exactMatchMutex: sync.RWMutex{},
 		}
 		// Initialize wildcard counter to 0
 		trie.wildcardCount.Store(0)
@@ -142,25 +142,24 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			// Manually add to trie (simulating original behavior)
 			segments := strings.Split(topic, "/")
 
-			trie.root.mutex.Lock()
 			currentNode := trie.root
 
 			for _, segment := range segments {
-				if _, exists := currentNode.children[segment]; !exists {
-					currentNode.children[segment] = &TrieNode{
+				children, exists := currentNode.children.Load(segment)
+				if !exists {
+					children = &TrieNode{
 						segment:       segment,
-						children:      make(map[string]*TrieNode),
-						subscriptions: make(map[uint64]*Subscription),
-						mutex:         sync.RWMutex{},
+						children:      xsync.NewMap[string, *TrieNode](),
+						subscriptions: xsync.NewMap[uint64, *Subscription](),
 					}
+					currentNode.children.Store(segment, children)
 				}
 
-				currentNode = currentNode.children[segment]
+				currentNode = children
 			}
 
 			// Add the subscription to the final node's map
-			currentNode.subscriptions[uint64(index)] = subscription
-			trie.root.mutex.Unlock()
+			currentNode.subscriptions.Store(uint64(index), subscription)
 		}
 
 		// Create test topics
@@ -178,9 +177,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			resultMap := make(map[uint64]*Subscription)
 			segments := strings.Split(topic, "/")
 
-			trie.root.mutex.RLock()
 			findMatches(trie.root, segments, 0, resultMap)
-			trie.root.mutex.RUnlock()
 
 			result := make([]*Subscription, 0, len(resultMap))
 			for _, sub := range resultMap {

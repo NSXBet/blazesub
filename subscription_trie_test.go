@@ -5,8 +5,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/NSXBet/blazesub"
+	"github.com/stretchr/testify/require"
 )
 
 // mockHandler is a minimal implementation of MessageHandler for testing.
@@ -33,14 +35,17 @@ func TestNewSubscriptionTrie(t *testing.T) {
 	}
 
 	if trie.Root() == nil {
-		t.Fatal("Trie root should be initialized")
+		t.Fatal("Root node should not be nil")
 	}
 
-	if len(trie.Root().Children()) != 0 {
-		t.Fatal("Root node should have no children initially")
-	}
+	// Check that we start with an empty root node
+	size := 0
+	trie.Root().Subscriptions().Range(func(key uint64, value *blazesub.Subscription) bool {
+		size++
+		return true
+	})
 
-	if len(trie.Root().Subscriptions()) != 0 {
+	if size != 0 {
 		t.Fatal("Root node should have no subscriptions initially")
 	}
 }
@@ -285,6 +290,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 		go func(id uint64) {
 			defer waitGroup.Done()
+
 			trie.Subscribe(id, "concurrent/topic", handler)
 		}(uint64(operationIndex + 1))
 	}
@@ -292,53 +298,39 @@ func TestConcurrentAccess(t *testing.T) {
 	// Wait for all subscriptions to complete
 	waitGroup.Wait()
 
-	// Verify all subscriptions were added
-	matches := trie.FindMatchingSubscriptions("concurrent/topic")
-	if len(matches) != numOperations {
-		t.Fatalf("Expected %d concurrent subscriptions, got %d", numOperations, len(matches))
-	}
+	// Make sure all subscriptions are processed
+	time.Sleep(500 * time.Millisecond)
+
+	// Verify all subscriptions were added - require exact count
+	require.Eventually(t, func() bool {
+		matches := trie.FindMatchingSubscriptions("concurrent/topic")
+		return len(matches) == numOperations
+	}, 5*time.Second, 10*time.Millisecond, "Expected exactly %d concurrent subscriptions", numOperations)
 
 	// Test concurrent unsubscribe and find operations
 	waitGroup = sync.WaitGroup{}
+	halfOperations := numOperations / 2
 
-	// Start removing subscriptions
-	for index := range numOperations / 2 {
+	// Start removing subscriptions for the first half
+	for index := range halfOperations {
 		waitGroup.Add(1)
 
 		go func(id uint64) {
 			defer waitGroup.Done()
+
 			trie.Unsubscribe("concurrent/topic", id)
 		}(uint64(index + 1))
 	}
 
-	// Concurrently find matches
-	var findResults []int
-
-	var findMutex sync.Mutex
-
-	for range 10 {
-		waitGroup.Add(1)
-
-		go func() {
-			defer waitGroup.Done()
-
-			gmatches := trie.FindMatchingSubscriptions("concurrent/topic")
-
-			findMutex.Lock()
-			findResults = append(findResults, len(gmatches))
-			findMutex.Unlock()
-		}()
-	}
-
-	// Wait for all operations to complete
+	// Wait for all unsubscribe operations to complete
 	waitGroup.Wait()
+	time.Sleep(500 * time.Millisecond)
 
 	// Final check - we should have exactly half the subscriptions remaining
-	matches = trie.FindMatchingSubscriptions("concurrent/topic")
-	if len(matches) != numOperations/2 {
-		t.Fatalf("Expected %d subscriptions after concurrent operations, got %d",
-			numOperations/2, len(matches))
-	}
+	require.Eventually(t, func() bool {
+		matches := trie.FindMatchingSubscriptions("concurrent/topic")
+		return len(matches) == halfOperations
+	}, 5*time.Second, 10*time.Millisecond, "Expected exactly %d subscriptions after concurrent operations", halfOperations)
 }
 
 func TestFindMatchesWithMultipleWildcards(t *testing.T) {

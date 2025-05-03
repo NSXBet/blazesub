@@ -7,6 +7,7 @@ require (
 	github.com/go-logr/zapr v1.3.0
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	github.com/panjf2000/ants/v2 v2.11.3
+	github.com/puzpuzpuz/xsync/v4 v4.1.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/atomic v1.11.0
 	go.uber.org/zap v1.27.0

@@ -2,12 +2,14 @@ package blazesub
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/panjf2000/ants/v2"
+	"github.com/puzpuzpuz/xsync/v4"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -19,9 +21,11 @@ type MessageHandler interface {
 type Bus struct {
 	subID         *atomic.Uint64
 	subscriptions *SubscriptionTrie
-	subLock       sync.RWMutex
 	pubpool       *ants.Pool
 	logger        logr.Logger
+	// Cache recently used topics for faster lookup
+	topicCache   *xsync.Map[string, []*Subscription]
+	maxCacheSize int
 }
 
 func NewBus(config Config) (*Bus, error) {
@@ -51,8 +55,14 @@ func NewBus(config Config) (*Bus, error) {
 		options = append(options, ants.WithExpiryDuration(config.ExpiryDuration))
 	}
 
+	// Increase worker pool size for better concurrency
+	poolSize := config.WorkerCount
+	if poolSize < 100 {
+		poolSize = 100 // Ensure we have enough workers for high throughput
+	}
+
 	pool, err := ants.NewPool(
-		config.WorkerCount,
+		poolSize,
 		options...,
 	)
 	if err != nil {
@@ -62,8 +72,10 @@ func NewBus(config Config) (*Bus, error) {
 	return &Bus{
 		subID:         atomic.NewUint64(0),
 		subscriptions: NewSubscriptionTrie(),
-		subLock:       sync.RWMutex{},
 		pubpool:       pool,
+		logger:        config.Logger,
+		topicCache:    xsync.NewMap[string, []*Subscription](),
+		maxCacheSize:  1000, // Cache up to 1000 topics
 	}, nil
 }
 
@@ -99,20 +111,42 @@ func (b *Bus) Publish(topic string, payload []byte) {
 		UTCTimestamp: time.Now().UTC(),
 	}
 
-	// Find matching subscriptions using the trie
-	b.subLock.RLock()
-	matchingSubs := b.subscriptions.FindMatchingSubscriptions(topic)
-	b.subLock.RUnlock()
+	// Try to get subscribers from cache first for common topics
+	var matchingSubs []*Subscription
+
+	if cachedSubs, exists := b.topicCache.Load(topic); exists {
+		// Use cached subscribers
+		matchingSubs = cachedSubs
+	} else {
+		// Find matching subscriptions using the trie
+		matchingSubs = b.subscriptions.FindMatchingSubscriptions(topic)
+
+		// Cache the result if there aren't too many cached topics already
+		if b.topicCache.Size() < b.maxCacheSize {
+			b.topicCache.Store(topic, matchingSubs)
+		}
+	}
+
+	// Fast path: if there are no subscribers, return immediately
+	if len(matchingSubs) == 0 {
+		return
+	}
+
+	// Use a sync.WaitGroup for better performance with multiple subscribers
+	var wg sync.WaitGroup
+	wg.Add(len(matchingSubs))
 
 	// Submit a task to the pool for each subscription
 	for _, sub := range matchingSubs {
 		subscription := sub // Create a local copy for the closure
 
 		if err := b.pubpool.Submit(func() {
+			defer wg.Done()
 			if err := subscription.receiveMessage(msg); err != nil {
 				b.logger.Error(err, "error receiving message", "topic", topic)
 			}
 		}); err != nil {
+			wg.Done() // Make sure to reduce the count if submission fails
 			b.logger.Error(err, "error submitting message to pool", "topic", topic)
 		}
 	}
@@ -120,26 +154,32 @@ func (b *Bus) Publish(topic string, payload []byte) {
 
 // removeSubscription removes a subscription from the trie.
 func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
-	b.subLock.Lock()
-	defer b.subLock.Unlock()
-
 	b.subscriptions.Unsubscribe(topic, subscriptionID)
+
+	// If this is a wildcard subscription, we need to clear the entire topic cache
+	// as it could affect any number of topics
+	if strings.ContainsAny(topic, "+#") {
+		// For wildcard topics, clear the entire cache as it might affect many topics
+		b.topicCache = xsync.NewMap[string, []*Subscription]()
+	} else {
+		// For exact topic matches, just remove that topic from the cache
+		b.topicCache.Delete(topic)
+	}
 }
 
 // Subscribe creates a new subscription for the specified topic.
 func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	subID := b.subID.Add(1)
 
-	b.subLock.Lock()
-	defer b.subLock.Unlock()
-
 	// Use the trie's Subscribe method to create and register the subscription
 	subscription := b.subscriptions.Subscribe(subID, topic, nil)
+
+	// Remove from topic cache to ensure it's refreshed on next publish
+	b.topicCache.Delete(topic)
 
 	// Set up unsubscribe function
 	unsubscribeFn := func() error {
 		b.removeSubscription(topic, subID)
-
 		return nil
 	}
 	subscription.SetUnsubscribeFunc(unsubscribeFn)
