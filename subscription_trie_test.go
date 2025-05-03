@@ -285,7 +285,7 @@ func TestConcurrentAccess(t *testing.T) {
 	numOperations := 100
 
 	// Add subscriptions concurrently
-	for operationIndex := range numOperations {
+	for operationIndex := 0; operationIndex < numOperations; operationIndex++ {
 		waitGroup.Add(1)
 
 		go func(id uint64) {
@@ -312,7 +312,7 @@ func TestConcurrentAccess(t *testing.T) {
 	halfOperations := numOperations / 2
 
 	// Start removing subscriptions for the first half
-	for index := range halfOperations {
+	for index := 0; index < halfOperations; index++ {
 		waitGroup.Add(1)
 
 		go func(id uint64) {

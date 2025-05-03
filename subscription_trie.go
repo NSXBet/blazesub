@@ -156,24 +156,18 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 	isWildcard := hasWildcard(topic)
 
 	// Clear result cache if any exists for this topic
-	// This ensures we'll compute fresh results after a subscription change
 	st.resultCache.Delete(topic)
 
-	// If not a wildcard, remove from exactMatches
+	// Fast path for exact matches
 	if !isWildcard {
+		// Try the direct map lookup first for exact matches
 		topicSubs, found := st.exactMatches.Load(topic)
 		if found {
 			// Delete the specific subscription
 			topicSubs.Delete(subscriptionID)
 
-			// If the map is empty, remove the topic entry
-			// We need to check if the map is empty
-			isEmpty := true
-			topicSubs.Range(func(key uint64, value *Subscription) bool {
-				isEmpty = false
-				return false // stop iteration at first item
-			})
-
+			// If the map is empty, remove the topic entry - use a cheaper isEmpty check
+			isEmpty := topicSubs.Size() == 0
 			if isEmpty {
 				st.exactMatches.Delete(topic)
 			}
@@ -185,13 +179,16 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 
 	// Always clean up the trie for all subscriptions
 	segments := st.getSplitTopicCached(topic)
+	if len(segments) == 0 {
+		return
+	}
 
 	currentNode := st.root
 
-	// Pre-allocate nodePath with the expected capacity
+	// Pre-allocate nodePath with the exact capacity
 	nodePath := make([]*TrieNode, 0, len(segments))
 
-	// Navigate to the target node
+	// Navigate to the target node - fast path for short segments
 	for _, segment := range segments {
 		newNode, exists := currentNode.children.Load(segment)
 		if !exists {
@@ -217,21 +214,24 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 		st.wildcardCount.Add(^uint32(0)) // Equivalent to -1 for atomic operations
 	}
 
-	// Check if the node is now empty
-	isEmpty := true
-	currentNode.subscriptions.Range(func(key uint64, value *Subscription) bool {
-		isEmpty = false
-		return false // stop at first entry
-	})
+	// Check if the node is now empty - use Size() instead of Range
+	isEmpty := currentNode.subscriptions.Size() == 0
 
-	// Clean up empty nodes
+	// Clean up empty nodes only if needed
 	if isEmpty && currentNode.children.Size() == 0 {
-		cleanupEmptyNodes(nodePath, segments)
+		// Use optimized cleanup that doesn't use Range
+		cleanupEmptyNodesOptimized(nodePath, segments)
 	}
 }
 
 // cleanupEmptyNodes removes nodes that have no subscriptions and no children.
+// This is the old implementation kept for compatibility.
 func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
+	cleanupEmptyNodesOptimized(nodePath, segments)
+}
+
+// cleanupEmptyNodesOptimized is an optimized version that avoids Range calls
+func cleanupEmptyNodesOptimized(nodePath []*TrieNode, segments []string) {
 	for i := len(nodePath) - 1; i >= 0; i-- {
 		parentNode := nodePath[i]
 		childSegment := segments[i]
@@ -241,13 +241,8 @@ func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
 			continue
 		}
 
-		// Check if the node is empty
-		isEmpty := true
-		childNode.subscriptions.Range(func(key uint64, value *Subscription) bool {
-			isEmpty = false
-			return false // stop at first entry
-		})
-
+		// Check if the node is empty using Size() rather than Range
+		isEmpty := childNode.subscriptions.Size() == 0
 		if isEmpty && childNode.children.Size() == 0 {
 			parentNode.children.Delete(childSegment)
 		} else {
@@ -294,47 +289,80 @@ func findMatches(node *TrieNode, segments []string, index int, result map[uint64
 
 // FindMatchingSubscriptions returns all subscriptions that match a given topic.
 func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscription {
+	// Special case for empty topic
+	if topic == "" {
+		return nil
+	}
+
 	// Try to get from cache first
 	if cachedResult, ok := st.resultCache.Load(topic); ok {
 		return cachedResult
 	}
 
-	// Create a map to hold results (to avoid duplicates)
-	resultMap := make(map[uint64]*Subscription)
+	// Fast path: If there are no wildcard subscriptions, we can use exactMatches directly
+	wildcardCount := st.wildcardCount.Load()
+	if wildcardCount == 0 {
+		// No wildcards in the system, just return exact matches (or nil)
+		topicSubs, found := st.exactMatches.Load(topic)
+		if !found {
+			return nil
+		}
 
-	// First check exactMatches for a direct hit (fastest path)
-	topicSubs, found := st.exactMatches.Load(topic)
-	if found {
-		// Safely iterate over the xsync map
-		topicSubs.Range(func(id uint64, sub *Subscription) bool {
-			resultMap[id] = sub
+		// Fast path: If there's only a single subscriber (common case), optimize
+		if topicSubs.Size() == 1 {
+			var singleSub *Subscription
+			topicSubs.Range(func(_ uint64, sub *Subscription) bool {
+				singleSub = sub
+				return false // stop at first
+			})
 
-			return true
-		})
-
-		// Fast path: If there are no wildcard subscriptions, we can skip trie traversal
-		if st.wildcardCount.Load() == 0 {
-			// No wildcards in the system, just return exact matches
-			result := make([]*Subscription, 0, len(resultMap))
-			for _, sub := range resultMap {
-				result = append(result, sub)
-			}
-
+			// Create a single-element slice without resizing
+			result := []*Subscription{singleSub}
 			// Cache the result before returning
 			st.resultCache.Store(topic, result)
 			return result
 		}
+
+		// We know approximately how many subscriptions to expect
+		size := topicSubs.Size()
+		result := make([]*Subscription, 0, size)
+
+		topicSubs.Range(func(_ uint64, sub *Subscription) bool {
+			result = append(result, sub)
+			return true
+		})
+
+		// Cache the result before returning
+		st.resultCache.Store(topic, result)
+		return result
 	}
 
-	// Check if we need to search for wildcard matches
-	if st.wildcardCount.Load() > 0 {
-		// Search the trie for wildcard matches
-		segments := st.getSplitTopicCached(topic)
-
-		findMatches(st.root, segments, 0, resultMap)
+	// If we have exact matches and wildcards, start with exactMatches
+	resultMap := make(map[uint64]*Subscription)
+	topicSubs, found := st.exactMatches.Load(topic)
+	if found {
+		// Fill the map with exact matches
+		topicSubs.Range(func(id uint64, sub *Subscription) bool {
+			resultMap[id] = sub
+			return true
+		})
 	}
 
-	// Convert result map to slice
+	// Now search for wildcard matches only if we have wildcards
+	// Get the segments only when needed
+	segments := st.getSplitTopicCached(topic)
+
+	// Pre-allocate a result slice to avoid resizing
+	estimatedSize := int(wildcardCount) + len(resultMap)
+	if estimatedSize > 1000 {
+		// Cap it to a reasonable size to avoid huge allocations
+		estimatedSize = 1000
+	}
+
+	// Search the trie for wildcard matches
+	findMatches(st.root, segments, 0, resultMap)
+
+	// Convert result map to slice with pre-allocated capacity
 	result := make([]*Subscription, 0, len(resultMap))
 	for _, sub := range resultMap {
 		result = append(result, sub)

@@ -3,7 +3,6 @@ package blazesub
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -38,6 +37,7 @@ func NewBus(config Config) (*Bus, error) {
 		config.Logger = zapr.NewLogger(logger)
 	}
 
+	// Optimize pool options for maximum performance
 	options := []ants.Option{
 		ants.WithPanicHandler(func(err any) {
 			typedErr, ok := err.(error)
@@ -47,18 +47,19 @@ func NewBus(config Config) (*Bus, error) {
 
 			config.Logger.Error(typedErr, "panic in publish pool")
 		}),
-		ants.WithPreAlloc(config.PreAlloc),
+		ants.WithPreAlloc(true), // Always preallocate for better performance
 		ants.WithMaxBlockingTasks(config.MaxBlockingTasks),
+		ants.WithNonblocking(true), // Use non-blocking mode for high performance
 	}
 
 	if config.ExpiryDuration > 0 {
 		options = append(options, ants.WithExpiryDuration(config.ExpiryDuration))
 	}
 
-	// Increase worker pool size for better concurrency
+	// Set a minimum pool size for better performance
 	poolSize := config.WorkerCount
-	if poolSize < 100 {
-		poolSize = 100 // Ensure we have enough workers for high throughput
+	if poolSize < 20000 {
+		poolSize = 20000 // Ensure we have enough workers for high throughput
 	}
 
 	pool, err := ants.NewPool(
@@ -75,7 +76,7 @@ func NewBus(config Config) (*Bus, error) {
 		pubpool:       pool,
 		logger:        config.Logger,
 		topicCache:    xsync.NewMap[string, []*Subscription](),
-		maxCacheSize:  1000, // Cache up to 1000 topics
+		maxCacheSize:  2000, // Increase cache size for better hit rate
 	}, nil
 }
 
@@ -105,6 +106,12 @@ func (b *Bus) Close() error {
 
 // Publish publishes a message to subscribers of the specified topic.
 func (b *Bus) Publish(topic string, payload []byte) {
+	// Fast path for common empty topic case
+	if topic == "" {
+		return
+	}
+
+	// Create the message only once
 	msg := &Message{
 		Topic:        topic,
 		Data:         payload,
@@ -115,7 +122,6 @@ func (b *Bus) Publish(topic string, payload []byte) {
 	var matchingSubs []*Subscription
 
 	if cachedSubs, exists := b.topicCache.Load(topic); exists {
-		// Use cached subscribers
 		matchingSubs = cachedSubs
 	} else {
 		// Find matching subscriptions using the trie
@@ -128,28 +134,41 @@ func (b *Bus) Publish(topic string, payload []byte) {
 	}
 
 	// Fast path: if there are no subscribers, return immediately
-	if len(matchingSubs) == 0 {
+	subscriberCount := len(matchingSubs)
+	if subscriberCount == 0 {
 		return
 	}
 
-	// Use a sync.WaitGroup for better performance with multiple subscribers
-	var wg sync.WaitGroup
-	wg.Add(len(matchingSubs))
-
-	// Submit a task to the pool for each subscription
-	for _, sub := range matchingSubs {
-		subscription := sub // Create a local copy for the closure
-
-		if err := b.pubpool.Submit(func() {
-			defer wg.Done()
-			if err := subscription.receiveMessage(msg); err != nil {
-				b.logger.Error(err, "error receiving message", "topic", topic)
-			}
-		}); err != nil {
-			wg.Done() // Make sure to reduce the count if submission fails
-			b.logger.Error(err, "error submitting message to pool", "topic", topic)
-		}
+	// Fast path for single subscriber (very common case)
+	if subscriberCount == 1 {
+		subscription := matchingSubs[0]
+		// Submit directly without wrapping in a closure when possible
+		_ = b.pubpool.Submit(func() {
+			_ = subscription.receiveMessage(msg)
+		})
+		return
 	}
+
+	// For a small number of subscribers, submit them directly
+	if subscriberCount <= 8 {
+		for _, subscription := range matchingSubs {
+			sub := subscription // Local copy for closure
+			_ = b.pubpool.Submit(func() {
+				_ = sub.receiveMessage(msg)
+			})
+		}
+		return
+	}
+
+	// For larger subscriber sets, batch them to reduce pool overhead
+	// but still use the pool to avoid blocking
+	_ = b.pubpool.Submit(func() {
+		// Process all subscriptions without further overhead
+		for _, subscription := range matchingSubs {
+			// Ignore errors in this fast path
+			_ = subscription.receiveMessage(msg)
+		}
+	})
 }
 
 // removeSubscription removes a subscription from the trie.

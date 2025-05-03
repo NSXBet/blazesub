@@ -1,7 +1,5 @@
 package blazesub
 
-import "fmt"
-
 type Subscription struct {
 	id            uint64
 	topic         string
@@ -22,15 +20,14 @@ func (s *Subscription) Topic() string {
 }
 
 func (s *Subscription) receiveMessage(message *Message) error {
+	// Fast path for nil handler (very common in benchmarks)
 	if s.handler == nil {
 		return nil
 	}
 
-	if err := s.handler.OnMessage(message); err != nil {
-		return fmt.Errorf("receiving published message: %w", err)
-	}
-
-	return nil
+	// Directly call handler without additional error checking in hot path
+	// This saves function call overhead and error handling overhead
+	return s.handler.OnMessage(message)
 }
 
 func (s *Subscription) SetUnsubscribeFunc(fn func() error) {
