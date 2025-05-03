@@ -15,7 +15,11 @@ type TrieNode struct {
 
 // SubscriptionTrie is a trie-based structure for efficient topic subscriptions
 type SubscriptionTrie struct {
-	root *TrieNode
+	root            *TrieNode
+	exactMatches    map[string]map[uint64]*Subscription // Fast map for exact match topics
+	exactMatchMutex sync.RWMutex                        // Separate mutex for the exact matches map
+	wildcardExists  bool                                // Flag to track if any wildcard subscriptions exist
+	wildcardMutex   sync.RWMutex                        // Mutex for the wildcard exists flag
 }
 
 // NewSubscriptionTrie creates a new subscription trie
@@ -26,7 +30,17 @@ func NewSubscriptionTrie() *SubscriptionTrie {
 			children:      make(map[string]*TrieNode),
 			subscriptions: make(map[uint64]*Subscription),
 		},
+		exactMatches: make(
+			map[string]map[uint64]*Subscription,
+			1024,
+		), // Pre-allocate with larger capacity for better performance
+		wildcardExists: false,
 	}
+}
+
+// hasWildcard checks if a subscription pattern contains wildcard characters
+func hasWildcard(pattern string) bool {
+	return strings.ContainsAny(pattern, "+#")
 }
 
 // Subscribe adds a subscription for a topic pattern
@@ -45,10 +59,11 @@ func (st *SubscriptionTrie) Subscribe(id uint64, topic string, handler MessageHa
 	}
 	subscription.SetUnsubscribeFunc(unsubscribeFn)
 
+	isWildcard := hasWildcard(topic)
+
+	// Always add to the trie for node cleanup tests to work properly
 	segments := strings.Split(topic, "/")
 	st.root.mutex.Lock()
-	defer st.root.mutex.Unlock()
-
 	currentNode := st.root
 
 	for _, segment := range segments {
@@ -70,12 +85,46 @@ func (st *SubscriptionTrie) Subscribe(id uint64, topic string, handler MessageHa
 
 	// Add the subscription to the final node's map
 	currentNode.subscriptions[id] = subscription
+	st.root.mutex.Unlock()
+
+	// Set the wildcard flag to true if this is a wildcard subscription
+	if isWildcard {
+		st.wildcardMutex.Lock()
+		st.wildcardExists = true
+		st.wildcardMutex.Unlock()
+	}
+
+	// If it's an exact match, also add to the exactMatches map
+	if !isWildcard {
+		st.exactMatchMutex.Lock()
+		if _, exists := st.exactMatches[topic]; !exists {
+			st.exactMatches[topic] = make(map[uint64]*Subscription)
+		}
+		st.exactMatches[topic][id] = subscription
+		st.exactMatchMutex.Unlock()
+	}
 
 	return subscription
 }
 
 // Unsubscribe removes a subscription for a topic pattern
 func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
+	isWildcard := hasWildcard(topic)
+
+	// If not a wildcard, remove from exactMatches
+	if !isWildcard {
+		st.exactMatchMutex.Lock()
+		if topicSubs, exists := st.exactMatches[topic]; exists {
+			delete(topicSubs, subscriptionID)
+			// If the map is empty, remove the topic entry
+			if len(topicSubs) == 0 {
+				delete(st.exactMatches, topic)
+			}
+		}
+		st.exactMatchMutex.Unlock()
+	}
+
+	// Always clean up the trie for all subscriptions
 	segments := strings.Split(topic, "/")
 	st.root.mutex.Lock()
 	defer st.root.mutex.Unlock()
@@ -101,10 +150,61 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 	// Delete the subscription from the final node's map
 	delete(currentNode.subscriptions, subscriptionID)
 
-	// Clean up empty nodes (optional, can be removed if unnecessary)
+	// Clean up empty nodes
 	if len(currentNode.subscriptions) == 0 && len(currentNode.children) == 0 {
 		cleanupEmptyNodes(nodePath, segments)
 	}
+
+	// If this was a wildcard, check if we still have wildcards
+	if isWildcard {
+		st.checkForRemainingWildcards()
+	}
+}
+
+// checkForRemainingWildcards checks if there are any wildcard subscriptions left
+// Must be called with the root mutex locked
+func (st *SubscriptionTrie) checkForRemainingWildcards() {
+	// This is a simplistic check - we could make this more efficient by keeping a count
+	// of wildcard subscriptions, but this is good enough for now
+
+	// Do a quick check of the common wildcard nodes first
+	if hashNode, exists := st.root.children["#"]; exists && len(hashNode.subscriptions) > 0 {
+		return // We still have wildcards
+	}
+
+	if plusNode, exists := st.root.children["+"]; exists && len(plusNode.subscriptions) > 0 {
+		return // We still have wildcards
+	}
+
+	// Do a breadth-first search to look for any nodes with + or # children
+	queue := make([]*TrieNode, 0)
+	queue = append(queue, st.root)
+
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+
+		// Check if this node has any wildcard children
+		if hashNode, hasHash := node.children["#"]; hasHash && len(hashNode.subscriptions) > 0 {
+			return // Found a wildcard
+		}
+
+		if plusNode, hasPlus := node.children["+"]; hasPlus && len(plusNode.subscriptions) > 0 {
+			return // Found a wildcard
+		}
+
+		// Add all non-wildcard children to the queue
+		for segment, child := range node.children {
+			if segment != "#" && segment != "+" {
+				queue = append(queue, child)
+			}
+		}
+	}
+
+	// If we get here, there are no more wildcards
+	st.wildcardMutex.Lock()
+	st.wildcardExists = false
+	st.wildcardMutex.Unlock()
 }
 
 // cleanupEmptyNodes removes nodes that have no subscriptions and no children
@@ -125,13 +225,46 @@ func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
 
 // FindMatchingSubscriptions returns all subscriptions that match a given topic
 func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscription {
-	segments := strings.Split(topic, "/")
-	st.root.mutex.RLock()
-	defer st.root.mutex.RUnlock()
-
-	// Use a map to deduplicate subscriptions based on ID
+	// Create a map to hold results (to avoid duplicates)
 	resultMap := make(map[uint64]*Subscription)
-	findMatches(st.root, segments, 0, resultMap)
+
+	// First check exactMatches for a direct hit (fastest path)
+	st.exactMatchMutex.RLock()
+	if exactSubs, exists := st.exactMatches[topic]; exists {
+		// Fast path: If there are no wildcard subscriptions, we can skip trie traversal
+		st.wildcardMutex.RLock()
+		if !st.wildcardExists {
+			// No wildcards in the system, just return exact matches
+			st.wildcardMutex.RUnlock()
+			st.exactMatchMutex.RUnlock()
+
+			result := make([]*Subscription, 0, len(exactSubs))
+			for _, sub := range exactSubs {
+				result = append(result, sub)
+			}
+			return result
+		}
+		st.wildcardMutex.RUnlock()
+
+		// Add exact matches to result
+		for id, sub := range exactSubs {
+			resultMap[id] = sub
+		}
+	}
+	st.exactMatchMutex.RUnlock()
+
+	// Check if we need to search for wildcard matches
+	st.wildcardMutex.RLock()
+	wildcardExists := st.wildcardExists
+	st.wildcardMutex.RUnlock()
+
+	if wildcardExists {
+		// Search the trie for wildcard matches
+		segments := strings.Split(topic, "/")
+		st.root.mutex.RLock()
+		findMatches(st.root, segments, 0, resultMap)
+		st.root.mutex.RUnlock()
+	}
 
 	// Convert result map to slice
 	result := make([]*Subscription, 0, len(resultMap))
