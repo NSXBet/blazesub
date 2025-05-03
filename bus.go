@@ -22,9 +22,12 @@ type Bus struct {
 	subscriptions *SubscriptionTrie
 	pubpool       *ants.Pool
 	logger        logr.Logger
+
 	// Cache recently used topics for faster lookup
 	topicCache   *xsync.Map[string, []*Subscription]
 	maxCacheSize int
+
+	maxConcurrentSubscriptions int
 }
 
 func NewBus(config Config) (*Bus, error) {
@@ -35,6 +38,11 @@ func NewBus(config Config) (*Bus, error) {
 		}
 
 		config.Logger = zapr.NewLogger(logger)
+	}
+
+	maxConcurrentSubscriptions := config.MaxConcurrentSubscriptions
+	if maxConcurrentSubscriptions < 10 {
+		maxConcurrentSubscriptions = 10
 	}
 
 	// Optimize pool options for maximum performance
@@ -71,12 +79,13 @@ func NewBus(config Config) (*Bus, error) {
 	}
 
 	return &Bus{
-		subID:         atomic.NewUint64(0),
-		subscriptions: NewSubscriptionTrie(),
-		pubpool:       pool,
-		logger:        config.Logger,
-		topicCache:    xsync.NewMap[string, []*Subscription](),
-		maxCacheSize:  2000, // Increase cache size for better hit rate
+		subID:                      atomic.NewUint64(0),
+		subscriptions:              NewSubscriptionTrie(),
+		pubpool:                    pool,
+		logger:                     config.Logger,
+		topicCache:                 xsync.NewMap[string, []*Subscription](),
+		maxCacheSize:               2000, // Increase cache size for better hit rate
+		maxConcurrentSubscriptions: maxConcurrentSubscriptions,
 	}, nil
 }
 
@@ -150,7 +159,7 @@ func (b *Bus) Publish(topic string, payload []byte) {
 	}
 
 	// For a small number of subscribers, submit them directly
-	if subscriberCount <= 8 {
+	if subscriberCount <= b.maxConcurrentSubscriptions {
 		for _, subscription := range matchingSubs {
 			sub := subscription // Local copy for closure
 			_ = b.pubpool.Submit(func() {
