@@ -7,11 +7,13 @@ type Config struct {
 	PreAlloc         bool
 	MaxBlockingTasks int
 	ExpiryDuration   time.Duration
+	RegistryPoolSize int // Number of registries in the pool
 }
 
 const (
 	DefaultWorkerCount      = 10_000
 	DefaultMaxBlockingTasks = 10_000
+	DefaultRegistryPoolSize = 4 // Default number of registries
 )
 
 func NewConfig() Config {
@@ -20,5 +22,6 @@ func NewConfig() Config {
 		PreAlloc:         true,
 		MaxBlockingTasks: DefaultMaxBlockingTasks,
 		ExpiryDuration:   0,
+		RegistryPoolSize: DefaultRegistryPoolSize,
 	}
 }

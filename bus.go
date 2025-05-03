@@ -1,8 +1,8 @@
 package blazesub
 
 import (
+	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/panjf2000/ants/v2"
@@ -14,10 +14,9 @@ type MessageHandler interface {
 }
 
 type Bus struct {
-	subID         *atomic.Uint64
-	subscriptions map[string]map[uint64][]*Subscription
-	subLock       sync.RWMutex
-	pubpool       *ants.Pool
+	subID    *atomic.Uint64
+	registry Registry
+	pubpool  *ants.Pool
 }
 
 func NewBus(config Config) (*Bus, error) {
@@ -42,11 +41,19 @@ func NewBus(config Config) (*Bus, error) {
 		return nil, fmt.Errorf("creating publish pool: %w", err)
 	}
 
+	// Create registry pool with specified size
+	var registry Registry
+
+	if config.RegistryPoolSize > 1 {
+		registry = NewRegistryPool(config.RegistryPoolSize)
+	} else {
+		registry = NewRegistry()
+	}
+
 	return &Bus{
-		subID:         atomic.NewUint64(0),
-		subscriptions: map[string]map[uint64][]*Subscription{},
-		subLock:       sync.RWMutex{},
-		pubpool:       pool,
+		subID:    atomic.NewUint64(0),
+		registry: registry,
+		pubpool:  pool,
 	}, nil
 }
 
@@ -62,8 +69,7 @@ func (b *Bus) Close() error {
 	return nil
 }
 
-// TODO: turn data into strong type
-// TODO: error handling
+// Publish publishes a message to the specified topic
 func (b *Bus) Publish(topic string, payload []byte) {
 	msg := &Message{
 		Topic:        topic,
@@ -71,52 +77,39 @@ func (b *Bus) Publish(topic string, payload []byte) {
 		UTCTimestamp: time.Now().UTC(),
 	}
 
-	for _, subs := range b.subscriptions[topic] {
-		for _, sub := range subs {
-			if err := b.pubpool.Submit(func() {
-				if err := sub.receiveMessage(msg); err != nil {
-					fmt.Printf("error receiving message: %s", err)
-				}
-			}); err != nil {
-				fmt.Printf("error submitting message to pool: %s", err)
+	// Use the registry pool to find and execute matching subscriptions
+	err := b.registry.ExecuteSubscriptions(topic, func(ctx context.Context, sub *Subscription) error {
+		// Submit the message processing to the publish pool
+		return b.pubpool.Submit(func() {
+			if err := sub.receiveMessage(msg); err != nil {
+				fmt.Printf("error receiving message: %s", err)
 			}
-		}
+		})
+	})
+	if err != nil {
+		fmt.Printf("error publishing message: %s", err)
 	}
 }
 
-func (b *Bus) addSubscription(subscription *Subscription) {
-	b.subLock.Lock()
-	defer b.subLock.Unlock()
-
-	subs, ok := b.subscriptions[subscription.Topic()]
-	if !ok {
-		subs = map[uint64][]*Subscription{}
-		b.subscriptions[subscription.Topic()] = subs
-	}
-
-	subs[subscription.ID()] = append(subs[subscription.ID()], subscription)
-}
-
-func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
-	b.subLock.Lock()
-	defer b.subLock.Unlock()
-
-	subs, ok := b.subscriptions[topic]
-	if !ok {
-		return
-	}
-
-	delete(subs, subscriptionID)
-}
-
+// Subscribe creates a new subscription for the specified topic
 func (b *Bus) Subscribe(topic string) (*Subscription, error) {
+	// Create a new subscription
 	subscription := &Subscription{
 		id:    b.subID.Add(1),
 		topic: topic,
 		bus:   b,
 	}
 
-	b.addSubscription(subscription)
+	// Register the subscription with the registry pool
+	err := b.registry.RegisterSubscription(topic, int(subscription.id), subscription)
+	if err != nil {
+		return nil, fmt.Errorf("registering subscription: %w", err)
+	}
 
 	return subscription, nil
+}
+
+// removeSubscription removes a subscription by ID and topic
+func (b *Bus) removeSubscription(subscriptionID uint64) {
+	b.registry.RemoveSubscription(int(subscriptionID))
 }

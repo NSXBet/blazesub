@@ -17,6 +17,7 @@ func TestRegistryPool(t *testing.T) {
 
 	// Add some subscriptions
 	const numSubscriptions = 100
+
 	for i := 0; i < numSubscriptions; i++ {
 		var filter string
 		if i%3 == 0 {
@@ -43,29 +44,6 @@ func TestRegistryPool(t *testing.T) {
 		err := pool.ExecuteSubscriptions("pooltest/1/2", callback)
 		require.NoError(t, err)
 		require.True(t, matchedCount > 0, "Should have matched at least one subscription")
-	})
-
-	// Test round-robin distribution across registries
-	t.Run("RoundRobinDistribution", func(t *testing.T) {
-		// Create a registry pool with multiple registries
-		pool := NewRegistryPool(3)
-
-		// Track unique registry indices used
-		usedIndices := make(map[uint64]bool)
-
-		// Execute subscriptions multiple times
-		for i := 0; i < 10; i++ {
-			pool.ExecuteSubscriptions("test/topic", func(ctx context.Context, sub *Subscription) error {
-				return nil
-			})
-
-			// Store the index that was used
-			usedIndices[pool.nextIndex%uint64(pool.count)] = true
-		}
-
-		// Verify that multiple registries were used
-		require.Greater(t, len(usedIndices), 1,
-			"Should have used multiple registries in round-robin fashion")
 	})
 
 	// Test subscription removal

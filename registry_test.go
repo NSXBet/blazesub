@@ -477,7 +477,7 @@ func TestMultipleRegistries(t *testing.T) {
 	addSubscriptionsToRegistry(t, singleRegistry, 0, NumSubscriptions, "multitest")
 
 	// Create multiple registries with subscriptions distributed among them
-	multiRegistries := make([]*Registry, NumRegistries)
+	multiRegistries := make([]Registry, NumRegistries)
 	subsPerRegistry := NumSubscriptions / NumRegistries
 
 	for i := 0; i < NumRegistries; i++ {
@@ -587,7 +587,7 @@ func TestMultipleRegistries(t *testing.T) {
 }
 
 // Helper function to add subscriptions to a registry
-func addSubscriptionsToRegistry(t *testing.T, registry *Registry, startIdx, endIdx int, topicPrefix string) {
+func addSubscriptionsToRegistry(t *testing.T, registry Registry, startIdx, endIdx int, topicPrefix string) {
 	for i := startIdx; i < endIdx; i++ {
 		var filter string
 		if i%3 == 0 {

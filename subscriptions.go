@@ -34,7 +34,7 @@ func (s *Subscription) receiveMessage(message *Message) error {
 }
 
 func (s *Subscription) Unsubscribe() error {
-	s.bus.removeSubscription(s.topic, s.id)
+	s.bus.removeSubscription(s.id)
 
 	return nil
 }

@@ -3,15 +3,15 @@ package blazesub
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 )
 
 // RegistryPool manages multiple Registry instances to distribute load
 type RegistryPool struct {
-	registries []*Registry
+	registries []Registry
 	count      int
-	nextIndex  uint64 // for round-robin selection
 }
+
+var _ Registry = (*RegistryPool)(nil)
 
 // NewRegistryPool creates a new pool of registries
 func NewRegistryPool(count int) *RegistryPool {
@@ -19,55 +19,47 @@ func NewRegistryPool(count int) *RegistryPool {
 		count = 1 // At least one registry
 	}
 
-	registries := make([]*Registry, count)
-	for i := 0; i < count; i++ {
+	registries := make([]Registry, count)
+	for i := range count {
 		registries[i] = NewRegistry()
 	}
 
 	return &RegistryPool{
 		registries: registries,
 		count:      count,
-		nextIndex:  0,
 	}
 }
 
-// getRegistry returns the next registry in round-robin fashion
-func (p *RegistryPool) getRegistry() *Registry {
-	// Atomically increment and wrap around
-	idx := atomic.AddUint64(&p.nextIndex, 1) % uint64(p.count)
-	return p.registries[idx]
-}
-
-// RegisterSubscription registers a subscription across all registries in the pool
-// This ensures the subscription is matched regardless of which registry processes a topic
+// RegisterSubscription registers a subscription with a single registry
+// selected by hashing the subscription ID
 func (p *RegistryPool) RegisterSubscription(filter string, id int, subscription *Subscription) error {
-	// Register with the first registry to validate the filter
-	err := p.registries[0].RegisterSubscription(filter, id, subscription)
-	if err != nil {
-		return err
-	}
+	// Choose registry based on hash of ID
+	regIdx := id % p.count
 
-	// If successful, register with all other registries
-	for i := 1; i < p.count; i++ {
-		// We don't need to validate again since we already validated with the first registry
-		p.registries[i].RegisterSubscription(filter, id, subscription)
-	}
-
-	return nil
+	// Register with the chosen registry
+	return p.registries[regIdx].RegisterSubscription(filter, id, subscription)
 }
 
 // RemoveSubscription removes a subscription from all registries in the pool
 func (p *RegistryPool) RemoveSubscription(id int) {
-	for _, registry := range p.registries {
-		registry.RemoveSubscription(id)
-	}
+	// Choose registry based on hash of ID
+	regIdx := id % p.count
+
+	// Remove from the chosen registry
+	p.registries[regIdx].RemoveSubscription(id)
 }
 
 // ExecuteSubscriptions executes the callback for all subscriptions matching the topic
-// using a single registry chosen in round-robin fashion
+// across all registries sequentially
 func (p *RegistryPool) ExecuteSubscriptions(topic string, callback SubscriptionCallback) error {
-	registry := p.getRegistry()
-	return registry.ExecuteSubscriptions(topic, callback)
+	// Process each registry one by one
+	for _, registry := range p.registries {
+		err := registry.ExecuteSubscriptions(topic, callback)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ExecuteSubscriptionsParallel executes the callback for all subscriptions matching the topic
@@ -114,20 +106,8 @@ func (p *RegistryPool) Count() int {
 	return p.count
 }
 
-// PublishTopic publishes a topic to a single registry (round-robin) or all registries
-// based on the publishing strategy
-func (p *RegistryPool) PublishTopic(topic string, callback SubscriptionCallback, publishToAll bool) error {
-	// If publishToAll is true, publish to all registries in parallel
-	if publishToAll {
-		return p.ExecuteSubscriptionsParallel(topic, callback)
-	}
-
-	// Otherwise, use round-robin to select a single registry
-	return p.ExecuteSubscriptions(topic, callback)
-}
-
 // GetAllRegistries returns all registries in the pool
 // This is useful for the Bus to directly access registries if needed
-func (p *RegistryPool) GetAllRegistries() []*Registry {
+func (p *RegistryPool) GetAllRegistries() []Registry {
 	return p.registries
 }
