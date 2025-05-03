@@ -1,12 +1,17 @@
-package blazesub
+package blazesub_test
 
 import (
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/NSXBet/blazesub"
 )
 
+//nolint:gocognit // reason: test table is long on purpose.
 func TestTrieUnsubscribeTable(t *testing.T) {
+	t.Parallel()
+
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -186,17 +191,19 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			trie := NewSubscriptionTrie()
+	for _, testcase := range tests {
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+
+			trie := blazesub.NewSubscriptionTrie()
 
 			// Add subscriptions
-			for _, sub := range tt.subscriptions {
+			for _, sub := range testcase.subscriptions {
 				trie.Subscribe(sub.id, sub.topic, handler)
 			}
 
 			// Verify subscriptions were added
-			for _, sub := range tt.subscriptions {
+			for _, sub := range testcase.subscriptions {
 				matches := trie.FindMatchingSubscriptions(sub.topic)
 				if len(matches) < 1 {
 					t.Fatalf("Expected at least one subscription for topic %s before unsubscribe", sub.topic)
@@ -204,12 +211,12 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 			}
 
 			// Unsubscribe
-			for _, unsub := range tt.unsubscribe {
+			for _, unsub := range testcase.unsubscribe {
 				trie.Unsubscribe(unsub.topic, unsub.id)
 			}
 
 			// Check expected matches
-			for topic, expectedCount := range tt.expectedMatches {
+			for topic, expectedCount := range testcase.expectedMatches {
 				matches := trie.FindMatchingSubscriptions(topic)
 				if len(matches) != expectedCount {
 					t.Fatalf("Expected %d matches for topic %s after unsubscribe, got %d",
@@ -218,10 +225,10 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 			}
 
 			// Check if trie is empty when expected
-			if tt.expectedEmpty {
-				if len(trie.root.children) != 0 {
+			if testcase.expectedEmpty {
+				if len(trie.Root().Children()) != 0 {
 					t.Fatalf("Expected trie to be empty after unsubscribe, but it still has %d child nodes",
-						len(trie.root.children))
+						len(trie.Root().Children()))
 				}
 			}
 		})
@@ -230,11 +237,13 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 
 // TestUnsubscribeMaintainsMemory tests to see if the unsubscribe function correctly cleans up memory.
 func TestUnsubscribeMaintainsMemory(t *testing.T) {
+	t.Parallel()
+
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
 	}
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 
 	// Add a lot of subscriptions with a common prefix
 	commonPrefix := "test/shared/prefix"
@@ -253,9 +262,9 @@ func TestUnsubscribeMaintainsMemory(t *testing.T) {
 	}
 
 	// Check that the prefix nodes still exist
-	currentNode := trie.root
+	currentNode := trie.Root()
 	for _, segment := range []string{"test", "shared", "prefix"} {
-		if child, exists := currentNode.children[segment]; exists {
+		if child, exists := currentNode.Children()[segment]; exists {
 			currentNode = child
 		} else {
 			t.Fatalf("Prefix node '%s' was removed even though some subscriptions still use it", segment)
@@ -268,18 +277,20 @@ func TestUnsubscribeMaintainsMemory(t *testing.T) {
 	}
 
 	// Now the entire trie should be empty
-	if len(trie.root.children) != 0 {
+	if len(trie.Root().Children()) != 0 {
 		t.Fatalf("Trie should be empty after all subscriptions are removed")
 	}
 }
 
 // TestResubscribePerformance tests the performance implications of unsubscribing and resubscribing.
 func TestResubscribePerformance(t *testing.T) {
+	t.Parallel()
+
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
 	}
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 
 	// First, let's add 100 subscriptions
 	for i := uint64(1); i <= 100; i++ {
@@ -294,7 +305,7 @@ func TestResubscribePerformance(t *testing.T) {
 	}
 
 	// The trie should be empty
-	if len(trie.root.children) != 0 {
+	if len(trie.Root().Children()) != 0 {
 		t.Fatalf("Trie should be empty after all subscriptions are removed")
 	}
 

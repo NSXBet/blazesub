@@ -8,4 +8,4 @@ bench:
 
 .PHONY: lint
 lint:
-	@golangci-lint run --enable-all --out-format=colored-line-number --issues-exit-code=1
+	@golangci-lint run --issues-exit-code=1 --fix

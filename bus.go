@@ -2,12 +2,14 @@ package blazesub
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
 	"github.com/panjf2000/ants/v2"
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 )
 
 type MessageHandler interface {
@@ -19,13 +21,27 @@ type Bus struct {
 	subscriptions *SubscriptionTrie
 	subLock       sync.RWMutex
 	pubpool       *ants.Pool
+	logger        logr.Logger
 }
 
 func NewBus(config Config) (*Bus, error) {
+	if config.Logger.IsZero() {
+		logger, err := zap.NewProduction()
+		if err != nil {
+			return nil, fmt.Errorf("creating default logger: %w", err)
+		}
+
+		config.Logger = zapr.NewLogger(logger)
+	}
+
 	options := []ants.Option{
 		ants.WithPanicHandler(func(err any) {
-			// TODO: log error
-			fmt.Printf("panic in publish pool: %s", err)
+			typedErr, ok := err.(error)
+			if !ok {
+				return
+			}
+
+			config.Logger.Error(typedErr, "panic in publish pool")
 		}),
 		ants.WithPreAlloc(config.PreAlloc),
 		ants.WithMaxBlockingTasks(config.MaxBlockingTasks),
@@ -55,14 +71,22 @@ func NewBusWithDefaults() (*Bus, error) {
 	return NewBus(NewConfig())
 }
 
+const (
+	closeTimeout  = time.Second * 10
+	closeInterval = time.Millisecond * 10
+)
+
 func (b *Bus) Close() error {
 	defer b.pubpool.Release()
 
+	startTime := time.Now()
 	for b.pubpool.Waiting() > 0 {
-		time.Sleep(time.Millisecond * 10)
-	}
+		if time.Since(startTime) > closeTimeout {
+			return ErrTimeoutClosingBus
+		}
 
-	// TODO: wait for all messages to be processed
+		time.Sleep(closeInterval)
+	}
 
 	return nil
 }
@@ -86,10 +110,10 @@ func (b *Bus) Publish(topic string, payload []byte) {
 
 		if err := b.pubpool.Submit(func() {
 			if err := subscription.receiveMessage(msg); err != nil {
-				fmt.Printf("error receiving message: %s", err)
+				b.logger.Error(err, "error receiving message", "topic", topic)
 			}
 		}); err != nil {
-			fmt.Printf("error submitting message to pool: %s", err)
+			b.logger.Error(err, "error submitting message to pool", "topic", topic)
 		}
 	}
 }
@@ -121,31 +145,4 @@ func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	subscription.SetUnsubscribeFunc(unsubscribeFn)
 
 	return subscription, nil
-}
-
-// addSubscriptionToTrie adds a subscription to the trie.
-func (b *Bus) addSubscriptionToTrie(subscription *Subscription) {
-	topic := subscription.Topic()
-	segments := strings.Split(topic, "/")
-	currentNode := b.subscriptions.root
-
-	for _, segment := range segments {
-		if _, exists := currentNode.children[segment]; !exists {
-			currentNode.children[segment] = &TrieNode{
-				segment:       segment,
-				children:      make(map[string]*TrieNode),
-				subscriptions: make(map[uint64]*Subscription),
-			}
-		}
-
-		currentNode = currentNode.children[segment]
-
-		// If we reach a wildcard segment "#", it matches everything at this level and below
-		if segment == "#" {
-			break
-		}
-	}
-
-	// Add the subscription to the final node's map
-	currentNode.subscriptions[subscription.ID()] = subscription
 }

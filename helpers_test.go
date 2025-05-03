@@ -15,7 +15,7 @@ type SpyHandler struct {
 	delay    time.Duration
 }
 
-var _ blazesub.MessageHandler = &SpyHandler{}
+var _ blazesub.MessageHandler = (*SpyHandler)(nil)
 
 func (h *SpyHandler) OnMessage(message *blazesub.Message) error {
 	time.Sleep(h.delay)
@@ -51,15 +51,20 @@ func (h *SpyHandler) Reset() {
 func SpyMessageHandler(t *testing.T) *SpyHandler {
 	t.Helper()
 
-	return &SpyHandler{}
+	return &SpyHandler{
+		Messages: make(map[string][]*blazesub.Message),
+		delay:    time.Millisecond * 10,
+		mutex:    sync.Mutex{},
+	}
 }
 
 type noOpHandler struct {
 	MessageCount *atomic.Int64
 }
 
-var _ blazesub.MessageHandler = &noOpHandler{}
+var _ blazesub.MessageHandler = (*noOpHandler)(nil)
 
+//nolint:revive // internal test tool.
 func NoOpHandler(tb testing.TB) *noOpHandler {
 	tb.Helper()
 

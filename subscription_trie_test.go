@@ -1,10 +1,12 @@
-package blazesub
+package blazesub_test
 
 import (
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/NSXBet/blazesub"
 )
 
 // mockHandler is a minimal implementation of MessageHandler for testing.
@@ -13,7 +15,7 @@ type mockHandler struct {
 	mutex           sync.Mutex
 }
 
-func (m *mockHandler) OnMessage(_ *Message) error {
+func (m *mockHandler) OnMessage(_ *blazesub.Message) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.messageReceived = true
@@ -22,27 +24,31 @@ func (m *mockHandler) OnMessage(_ *Message) error {
 }
 
 func TestNewSubscriptionTrie(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 
 	if trie == nil {
 		t.Fatal("NewSubscriptionTrie should return a non-nil trie")
 	}
 
-	if trie.root == nil {
+	if trie.Root() == nil {
 		t.Fatal("Trie root should be initialized")
 	}
 
-	if len(trie.root.children) != 0 {
+	if len(trie.Root().Children()) != 0 {
 		t.Fatal("Root node should have no children initially")
 	}
 
-	if len(trie.root.subscriptions) != 0 {
+	if len(trie.Root().Subscriptions()) != 0 {
 		t.Fatal("Root node should have no subscriptions initially")
 	}
 }
 
 func TestSubscribeAndFindExactMatch(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -93,7 +99,9 @@ func TestSubscribeAndFindExactMatch(t *testing.T) {
 }
 
 func TestUnsubscribe(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -132,7 +140,7 @@ func TestUnsubscribe(t *testing.T) {
 
 // Rest of the test cases remain similar but with removed references to bus.
 func TestSubscribeAndFindWildcardMatches(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -194,7 +202,9 @@ func TestSubscribeAndFindWildcardMatches(t *testing.T) {
 }
 
 func TestCleanupEmptyNodes(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -204,12 +214,12 @@ func TestCleanupEmptyNodes(t *testing.T) {
 	trie.Subscribe(1, "deep/nested/topic/path", handler)
 
 	// Verify it's there
-	if len(trie.root.children) != 1 || trie.root.children["deep"] == nil {
+	if len(trie.Root().Children()) != 1 || trie.Root().Children()["deep"] == nil {
 		t.Fatal("Expected 'deep' node to be created")
 	}
 
-	deepNode := trie.root.children["deep"]
-	if len(deepNode.children) != 1 || deepNode.children["nested"] == nil {
+	deepNode := trie.Root().Children()["deep"]
+	if len(deepNode.Children()) != 1 || deepNode.Children()["nested"] == nil {
 		t.Fatal("Expected 'nested' node to be created")
 	}
 
@@ -217,13 +227,15 @@ func TestCleanupEmptyNodes(t *testing.T) {
 	trie.Unsubscribe("deep/nested/topic/path", 1)
 
 	// Check if nodes were cleaned up
-	if len(trie.root.children) != 0 {
+	if len(trie.Root().Children()) != 0 {
 		t.Fatal("Expected all nodes to be cleaned up after unsubscription")
 	}
 }
 
 func TestMultiLevelWildcardMatch(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -253,29 +265,32 @@ func TestMultiLevelWildcardMatch(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
 	}
 
 	// Use a wait group to synchronize goroutines
-	var wg sync.WaitGroup
+	var waitGroup sync.WaitGroup
+
 	// Number of concurrent operations
 	numOperations := 100
 
 	// Add subscriptions concurrently
-	for i := range numOperations {
-		wg.Add(1)
+	for operationIndex := range numOperations {
+		waitGroup.Add(1)
 
 		go func(id uint64) {
-			defer wg.Done()
+			defer waitGroup.Done()
 			trie.Subscribe(id, "concurrent/topic", handler)
-		}(uint64(i + 1))
+		}(uint64(operationIndex + 1))
 	}
 
 	// Wait for all subscriptions to complete
-	wg.Wait()
+	waitGroup.Wait()
 
 	// Verify all subscriptions were added
 	matches := trie.FindMatchingSubscriptions("concurrent/topic")
@@ -284,16 +299,16 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 
 	// Test concurrent unsubscribe and find operations
-	wg = sync.WaitGroup{}
+	waitGroup = sync.WaitGroup{}
 
 	// Start removing subscriptions
-	for i := range numOperations / 2 {
-		wg.Add(1)
+	for index := range numOperations / 2 {
+		waitGroup.Add(1)
 
 		go func(id uint64) {
-			defer wg.Done()
+			defer waitGroup.Done()
 			trie.Unsubscribe("concurrent/topic", id)
-		}(uint64(i + 1))
+		}(uint64(index + 1))
 	}
 
 	// Concurrently find matches
@@ -302,21 +317,21 @@ func TestConcurrentAccess(t *testing.T) {
 	var findMutex sync.Mutex
 
 	for range 10 {
-		wg.Add(1)
+		waitGroup.Add(1)
 
 		go func() {
-			defer wg.Done()
+			defer waitGroup.Done()
 
-			matches := trie.FindMatchingSubscriptions("concurrent/topic")
+			gmatches := trie.FindMatchingSubscriptions("concurrent/topic")
 
 			findMutex.Lock()
-			findResults = append(findResults, len(matches))
+			findResults = append(findResults, len(gmatches))
 			findMutex.Unlock()
 		}()
 	}
 
 	// Wait for all operations to complete
-	wg.Wait()
+	waitGroup.Wait()
 
 	// Final check - we should have exactly half the subscriptions remaining
 	matches = trie.FindMatchingSubscriptions("concurrent/topic")
@@ -327,7 +342,9 @@ func TestConcurrentAccess(t *testing.T) {
 }
 
 func TestFindMatchesWithMultipleWildcards(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -361,7 +378,9 @@ func TestFindMatchesWithMultipleWildcards(t *testing.T) {
 }
 
 func TestWildcardAtDifferentPositions(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -398,7 +417,9 @@ func TestWildcardAtDifferentPositions(t *testing.T) {
 }
 
 func TestEmptySegments(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -420,30 +441,32 @@ func TestEmptySegments(t *testing.T) {
 		{"a/b/c", 0, false},
 	}
 
-	for _, tc := range testCases {
-		matches := trie.FindMatchingSubscriptions(tc.topic)
+	for _, testcase := range testCases {
+		matches := trie.FindMatchingSubscriptions(testcase.topic)
 		found := false
 
 		for _, match := range matches {
-			if tc.expected && match.ID() == tc.subID {
+			if testcase.expected && match.ID() == testcase.subID {
 				found = true
 
 				break
 			}
 		}
 
-		if found != tc.expected {
-			if tc.expected {
-				t.Fatalf("Topic '%s': Expected to find subscription %d but didn't", tc.topic, tc.subID)
+		if found != testcase.expected {
+			if testcase.expected {
+				t.Fatalf("Topic '%s': Expected to find subscription %d but didn't", testcase.topic, testcase.subID)
 			} else {
-				t.Fatalf("Topic '%s': Found unexpected match", tc.topic)
+				t.Fatalf("Topic '%s': Found unexpected match", testcase.topic)
 			}
 		}
 	}
 }
 
 func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
-	trie := NewSubscriptionTrie()
+	t.Parallel()
+
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -489,7 +512,7 @@ func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
 }
 
 func BenchmarkSubscribe(b *testing.B) {
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -503,7 +526,7 @@ func BenchmarkSubscribe(b *testing.B) {
 }
 
 func BenchmarkFindMatchingSubscriptions(b *testing.B) {
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -517,13 +540,13 @@ func BenchmarkFindMatchingSubscriptions(b *testing.B) {
 
 	b.ResetTimer()
 
-	for range b.N {
+	for b.Loop() {
 		trie.FindMatchingSubscriptions("benchmark/topic")
 	}
 }
 
 func BenchmarkUnsubscribe(b *testing.B) {
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -542,7 +565,7 @@ func BenchmarkUnsubscribe(b *testing.B) {
 }
 
 func BenchmarkWildcardMatching(b *testing.B) {
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -563,9 +586,11 @@ func BenchmarkWildcardMatching(b *testing.B) {
 	for i := range b.N {
 		// Test matching against different topics in rotation
 		topic := "a/b/c"
-		if i%3 == 1 {
+
+		switch i % 3 {
+		case 1:
 			topic = "x/y/z"
-		} else if i%3 == 2 {
+		case 2:
 			topic = "new/different/topic"
 		}
 
@@ -583,9 +608,9 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	const numWildcards = 500
 
 	// Create implementations
-	trie := NewSubscriptionTrie()
-	linearSubscriptions := make([]*Subscription, 0, numSubscriptions)
-	mapSubscriptions := make(map[string][]*Subscription) // Direct map for fastest possible lookup
+	trie := blazesub.NewSubscriptionTrie()
+	linearSubscriptions := make([]*blazesub.Subscription, 0, numSubscriptions)
+	mapSubscriptions := make(map[string][]*blazesub.Subscription) // Direct map for fastest possible lookup
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -612,39 +637,42 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	}
 
 	// Add wildcard subscriptions (only for trie and linear search)
-	for i := range numWildcards {
+	for index := range numWildcards {
 		var topic string
-		if i%2 == 0 {
+
+		if index%2 == 0 {
 			// + wildcard
-			topic = fmt.Sprintf("test/+/%d/+/%d", i%50, i%5)
+			topic = fmt.Sprintf("test/+/%d/+/%d", index%50, index%5)
 		} else {
 			// # wildcard
-			topic = fmt.Sprintf("test/topic/%d/#", i%50)
+			topic = fmt.Sprintf("test/topic/%d/#", index%50)
 		}
 
-		subscription := trie.Subscribe(uint64(numSubscriptions-numWildcards+i), topic, handler)
-		linearSubscriptions = append(linearSubscriptions, subscription)
 		// Note: We don't add wildcards to the map since we're measuring exact match performance
+		subscription := trie.Subscribe(uint64(numSubscriptions-numWildcards+index), topic, handler)
+		linearSubscriptions = append(linearSubscriptions, subscription)
 	}
 
 	// Create a list of test topics to lookup
 	testTopics := make([]string, 100)
-	for i := 0; i < len(testTopics); i++ {
-		if i < 50 {
+
+	for index := range testTopics {
+		switch {
+		case index < 50:
 			// Existing topics for exact match
-			testTopics[i] = topics[i*10]
-		} else if i < 75 {
+			testTopics[index] = topics[index*10]
+		case index < 75:
 			// Topics that should match wildcards
-			testTopics[i] = fmt.Sprintf("test/anything/%d/something/%d", i%50, i%5)
-		} else {
+			testTopics[index] = fmt.Sprintf("test/anything/%d/something/%d", index%50, index%5)
+		default:
 			// Non-matching topics
-			testTopics[i] = fmt.Sprintf("other/topic/%d/no/match", i)
+			testTopics[index] = fmt.Sprintf("other/topic/%d/no/match", index)
 		}
 	}
 
 	// Linear search function that simulates basic topic matching without a trie
-	linearSearch := func(topic string) []*Subscription {
-		results := make([]*Subscription, 0)
+	linearSearch := func(topic string) []*blazesub.Subscription {
+		results := make([]*blazesub.Subscription, 0)
 
 		for _, sub := range linearSubscriptions {
 			if matchTopic(sub.Topic(), topic) {
@@ -656,7 +684,7 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	}
 
 	// Map lookup function - fastest possible for exact matches
-	mapLookup := func(topic string) []*Subscription {
+	mapLookup := func(topic string) []*blazesub.Subscription {
 		return mapSubscriptions[topic] // This will be nil if not found
 	}
 
@@ -699,8 +727,8 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 	const numSubscriptions = 5000
 
 	// Create implementations
-	trie := NewSubscriptionTrie()
-	mapSubscriptions := make(map[string][]*Subscription) // Direct map
+	trie := blazesub.NewSubscriptionTrie()
+	mapSubscriptions := make(map[string][]*blazesub.Subscription) // Direct map
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -725,12 +753,13 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 
 	// Create test topics (all exact matches)
 	testTopics := make([]string, 100)
-	for i := 0; i < len(testTopics); i++ {
-		testTopics[i] = topics[i%numTopics]
+
+	for index := range testTopics {
+		testTopics[index] = topics[index%numTopics]
 	}
 
 	// Map lookup function
-	mapLookup := func(topic string) []*Subscription {
+	mapLookup := func(topic string) []*blazesub.Subscription {
 		return mapSubscriptions[topic]
 	}
 
@@ -775,7 +804,7 @@ func matchTopic(filter, topic string) bool {
 	}
 
 	// Check each segment
-	for i := range len(filterSegments) {
+	for i := range filterSegments {
 		if filterSegments[i] != "+" && filterSegments[i] != topicSegments[i] {
 			return false
 		}
@@ -796,7 +825,7 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 
 	for _, wildcardPercentage := range densities {
 		b.Run(fmt.Sprintf("Wildcards_%d%%", wildcardPercentage), func(b *testing.B) {
-			trie := NewSubscriptionTrie()
+			trie := blazesub.NewSubscriptionTrie()
 
 			const totalSubs = 1000
 
@@ -811,25 +840,27 @@ func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
 			}
 
 			// Add wildcard subscriptions
-			for i := range wildcardCount {
+			for subscriptionIndex := range wildcardCount {
 				var topic string
-				if i%3 == 0 {
+
+				switch subscriptionIndex % 3 {
+				case 0:
 					// Single + wildcard
-					topic = fmt.Sprintf("test/+/%d/exact/%d", i%50, i%5)
-				} else if i%3 == 1 {
+					topic = fmt.Sprintf("test/+/%d/exact/%d", subscriptionIndex%50, subscriptionIndex%5)
+				case 1:
 					// Multiple + wildcards
-					topic = fmt.Sprintf("test/+/%d/+/%d", i%50, i%5)
-				} else {
+					topic = fmt.Sprintf("test/+/%d/+/%d", subscriptionIndex%50, subscriptionIndex%5)
+				default:
 					// # wildcard
-					topic = fmt.Sprintf("test/topic/%d/#", i%50)
+					topic = fmt.Sprintf("test/topic/%d/#", subscriptionIndex%50)
 				}
 
-				trie.Subscribe(uint64(normalCount+i), topic, handler)
+				trie.Subscribe(uint64(normalCount+subscriptionIndex), topic, handler)
 			}
 
 			// Create test topics
 			testTopics := make([]string, 100)
-			for i := 0; i < len(testTopics); i++ {
+			for i := range testTopics {
 				testTopics[i] = fmt.Sprintf("test/topic/%d/exact/%d", i%100, i%10)
 			}
 
@@ -849,6 +880,8 @@ func BenchmarkTrieVsLinearSearch(b *testing.B) {
 }
 
 // BenchmarkTrieVsMapMixedLookups compares trie and map performance with varying percentages of wildcard matches.
+//
+//nolint:gocognit // reason: complex benchmark test.
 func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 	// Setup same test data across all test cases
 	const numTopics = 1000
@@ -888,11 +921,11 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 		{"100%_Wildcards", 100},
 	}
 
-	for _, tc := range testCases {
-		b.Run(tc.name, func(b *testing.B) {
+	for _, testcase := range testCases {
+		b.Run(testcase.name, func(b *testing.B) {
 			// Create fresh implementations for each test case
-			trie := NewSubscriptionTrie()
-			mapSubscriptions := make(map[string][]*Subscription)
+			trie := blazesub.NewSubscriptionTrie()
+			mapSubscriptions := make(map[string][]*blazesub.Subscription)
 
 			// Add exact match subscriptions to both implementations
 			for i := range numSubscriptions {
@@ -910,18 +943,19 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 
 			// Create test topics with the specified percentage of wildcard matches
 			testTopics := make([]string, 100)
-			for i := 0; i < len(testTopics); i++ {
-				if i < (100 - tc.wildcardPercentage) {
+
+			for index := range testTopics {
+				if index < (100 - testcase.wildcardPercentage) {
 					// Exact match topics
-					testTopics[i] = topics[i%numTopics]
+					testTopics[index] = topics[index%numTopics]
 				} else {
 					// Create topics that match wildcards but aren't in the map
-					testTopics[i] = fmt.Sprintf("test/wildcard/%d/level/%d", i%10, i%5)
+					testTopics[index] = fmt.Sprintf("test/wildcard/%d/level/%d", index%10, index%5)
 				}
 			}
 
 			// Map lookup function
-			mapLookup := func(topic string) []*Subscription {
+			mapLookup := func(topic string) []*blazesub.Subscription {
 				return mapSubscriptions[topic]
 			}
 

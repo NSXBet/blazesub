@@ -1,6 +1,10 @@
-package blazesub
+package blazesub_test
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/NSXBet/blazesub"
+)
 
 func TestValidateTopicFilter(t *testing.T) {
 	tests := []struct {
@@ -68,7 +72,7 @@ func TestValidateTopicFilter(t *testing.T) {
 		{"mixed + and regular segments", "region/+/country/germany/city/+", false},
 	}
 
-	topicFilter := NewTopicFilter()
+	topicFilter := blazesub.NewTopicFilter()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,7 +112,7 @@ func TestValidateTopic(t *testing.T) {
 		{"contains parentheses", "topic(name)/subtopic", true},
 	}
 
-	topicFilter := NewTopicFilter()
+	topicFilter := blazesub.NewTopicFilter()
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

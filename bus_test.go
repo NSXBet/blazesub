@@ -15,12 +15,15 @@ type PubsubTestPair struct {
 }
 
 func ptp(t *testing.T, values ...any) []PubsubTestPair {
+	t.Helper()
+
 	if len(values)%2 != 0 {
 		t.Fatalf("values must be a list of topic and payload pairs")
 	}
 
 	ptp := []PubsubTestPair{}
 	for i := 0; i < len(values); i += 2 {
+		//nolint:forcetypeassert // reason: we know the types are correct.
 		ptp = append(ptp, PubsubTestPair{
 			topic:   values[i].(string),
 			payload: values[i+1].([]byte),
@@ -50,6 +53,8 @@ type PubsubTestCase struct {
 }
 
 func TestCanPublishAndSubscribe(t *testing.T) {
+	t.Parallel()
+
 	cases := []PubsubTestCase{
 		{
 			name:      "can publish and subscribe to a single topic",
@@ -85,37 +90,39 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 		},
 	}
 
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
+	for _, testcase := range cases {
+		t.Run(testcase.name, func(t *testing.T) {
+			t.Parallel()
+
 			bus, err := blazesub.NewBusWithDefaults()
 			require.NoError(t, err)
 
 			messageHandler := SpyMessageHandler(t)
 
-			for _, topic := range c.subscribe {
-				subscription, err := bus.Subscribe(topic)
-				require.NoError(t, err)
+			for _, topic := range testcase.subscribe {
+				subscription, serr := bus.Subscribe(topic)
+				require.NoError(t, serr)
 				require.NotNil(t, subscription)
 
 				subscription.OnMessage(messageHandler)
 			}
 
-			for _, pair := range c.publish {
+			for _, pair := range testcase.publish {
 				bus.Publish(pair.topic, pair.payload)
 			}
 
 			require.Eventually(t, func() bool {
-				return len(messageHandler.MessagesReceived()) == len(c.want)
+				return len(messageHandler.MessagesReceived()) == len(testcase.want)
 			}, time.Second, time.Millisecond*10)
 
-			for _, pair := range c.publish {
+			for _, pair := range testcase.publish {
 				require.Len(
 					t,
 					messageHandler.MessagesReceived()[pair.topic],
-					len(c.want[pair.topic]),
+					len(testcase.want[pair.topic]),
 				)
 
-				for i, payload := range c.want[pair.topic] {
+				for i, payload := range testcase.want[pair.topic] {
 					require.Equal(
 						t,
 						payload,
@@ -128,6 +135,8 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 }
 
 func TestSlowMessageHandler(t *testing.T) {
+	t.Parallel()
+
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
@@ -150,7 +159,7 @@ func TestSlowMessageHandler(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		return len(fastHandler.MessagesReceived()["test"]) == 1
-	}, time.Millisecond*10, time.Millisecond*1)
+	}, time.Millisecond*100, time.Millisecond*1)
 
 	require.Equal(t, []byte("test-data"), fastHandler.MessagesReceived()["test"][0].Data)
 
@@ -173,6 +182,7 @@ func BenchmarkPublishAndSubscribe(b *testing.B) {
 
 	bus, err := blazesub.NewBus(
 		blazesub.Config{
+			ExpiryDuration:   time.Duration(0),
 			WorkerCount:      10000,
 			MaxBlockingTasks: 1000000,
 			PreAlloc:         true,
@@ -186,8 +196,8 @@ func BenchmarkPublishAndSubscribe(b *testing.B) {
 
 	for i := range subscribers {
 		topic := fmt.Sprintf("test/%d", i%topics)
-		subs, err := bus.Subscribe(topic)
-		require.NoError(b, err)
+		subs, serr := bus.Subscribe(topic)
+		require.NoError(b, serr)
 
 		subs.OnMessage(messageHandler)
 	}
@@ -233,13 +243,13 @@ func BenchmarkPublishAndSubscribeWithWildcards_To_Multiple_Subscribers(b *testin
 			expectedMessages := int64(0)
 
 			for range subscribers {
-				subs, err := bus.Subscribe("test/+")
-				require.NoError(b, err)
+				subs, serr := bus.Subscribe("test/+")
+				require.NoError(b, serr)
 
 				subs.OnMessage(messageHandler)
 
-				subs2, err := bus.Subscribe("test/#")
-				require.NoError(b, err)
+				subs2, serr := bus.Subscribe("test/#")
+				require.NoError(b, serr)
 
 				subs2.OnMessage(messageHandler)
 			}
@@ -261,6 +271,8 @@ func BenchmarkPublishAndSubscribeWithWildcards_To_Multiple_Subscribers(b *testin
 
 // TestBusUnsubscribe tests that unsubscribing from the bus properly removes subscriptions.
 func TestBusUnsubscribe(t *testing.T) {
+	t.Parallel()
+
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
@@ -297,20 +309,25 @@ func TestBusUnsubscribe(t *testing.T) {
 
 // TestBusMultipleUnsubscribe tests unsubscribing multiple subscriptions.
 func TestBusMultipleUnsubscribe(t *testing.T) {
+	t.Parallel()
+
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
 	// Create several subscriptions
 	handler := SpyMessageHandler(t)
 
-	var subscriptions []*blazesub.Subscription
+	subscriptions := make([]*blazesub.Subscription, 5)
 
-	for i := range 5 {
-		topic := fmt.Sprintf("test/topic/%d", i)
-		subscription, err := bus.Subscribe(topic)
-		require.NoError(t, err)
+	for index := range 5 {
+		topic := fmt.Sprintf("test/topic/%d", index)
+
+		subscription, serr := bus.Subscribe(topic)
+		require.NoError(t, serr)
+
 		subscription.OnMessage(handler)
-		subscriptions = append(subscriptions, subscription)
+
+		subscriptions[index] = subscription
 	}
 
 	// Publish to all topics
@@ -333,8 +350,7 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 
 	// Unsubscribe from odd-numbered topics
 	for i := 1; i < 5; i += 2 {
-		err := subscriptions[i].Unsubscribe()
-		require.NoError(t, err)
+		require.NoError(t, subscriptions[i].Unsubscribe())
 	}
 
 	// Reset the handler
@@ -350,14 +366,14 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	time.Sleep(time.Millisecond * 50)
 
 	// Check that we only received messages for even-numbered topics (0, 2, 4)
-	for i := range 5 {
-		topic := fmt.Sprintf("test/topic/%d", i)
+	for index := range 5 {
+		topic := fmt.Sprintf("test/topic/%d", index)
 
-		if i%2 == 0 { // Even topics should have messages
+		if index%2 == 0 { // Even topics should have messages
 			require.Eventually(t, func() bool {
 				return len(handler.MessagesReceived()[topic]) == 1
 			}, time.Second, time.Millisecond*10)
-			require.Equal(t, []byte(fmt.Sprintf("data-%d-after", i)), handler.MessagesReceived()[topic][0].Data)
+			require.Equal(t, []byte(fmt.Sprintf("data-%d-after", index)), handler.MessagesReceived()[topic][0].Data)
 		} else { // Odd topics should have no messages
 			require.Empty(t, handler.MessagesReceived()[topic])
 		}
@@ -366,6 +382,8 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 
 // TestBusWildcardUnsubscribe tests unsubscribing from wildcard topics.
 func TestBusWildcardUnsubscribe(t *testing.T) {
+	t.Parallel()
+
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
@@ -444,6 +462,8 @@ func TestBusWildcardUnsubscribe(t *testing.T) {
 
 // TestBusUnsubscribePerformance tests the performance impact of frequent subscribe/unsubscribe operations.
 func TestBusUnsubscribePerformance(t *testing.T) {
+	t.Parallel()
+
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
@@ -453,14 +473,17 @@ func TestBusUnsubscribePerformance(t *testing.T) {
 	// Measure time to create 1000 subscriptions
 	startSubscribe := time.Now()
 
-	var subscriptions []*blazesub.Subscription
+	subscriptions := make([]*blazesub.Subscription, 1000)
 
-	for i := range 1000 {
-		topic := fmt.Sprintf("test/topic/%d", i%100) // 100 unique topics
-		sub, err := bus.Subscribe(topic)
-		require.NoError(t, err)
+	for index := range 1000 {
+		topic := fmt.Sprintf("test/topic/%d", index%100) // 100 unique topics
+
+		sub, serr := bus.Subscribe(topic)
+		require.NoError(t, serr)
+
 		sub.OnMessage(handler)
-		subscriptions = append(subscriptions, sub)
+
+		subscriptions[index] = sub
 	}
 
 	subscribeTime := time.Since(startSubscribe)
@@ -469,8 +492,7 @@ func TestBusUnsubscribePerformance(t *testing.T) {
 	startUnsubscribe := time.Now()
 
 	for _, sub := range subscriptions {
-		err := sub.Unsubscribe()
-		require.NoError(t, err)
+		require.NoError(t, sub.Unsubscribe())
 	}
 
 	unsubscribeTime := time.Since(startUnsubscribe)
@@ -480,8 +502,10 @@ func TestBusUnsubscribePerformance(t *testing.T) {
 
 	for i := range 1000 {
 		topic := fmt.Sprintf("test/topic/%d", i%100)
-		sub, err := bus.Subscribe(topic)
-		require.NoError(t, err)
+
+		sub, serr := bus.Subscribe(topic)
+
+		require.NoError(t, serr)
 		sub.OnMessage(handler)
 	}
 

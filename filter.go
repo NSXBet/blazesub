@@ -5,6 +5,13 @@ import (
 	"strings"
 )
 
+// TopicFilter is an interface for validating filters and topics.
+type TopicFilter interface {
+	Validate(filter string) error
+	ValidateTopic(topic string) error
+}
+
+// topicFilter is an implementation of TopicFilter.
 type topicFilter struct {
 	// Single comprehensive pattern for validating filters
 	// This pattern validates:
@@ -100,9 +107,4 @@ func (f *topicFilter) ValidateTopic(topic string) error {
 	}
 
 	return nil
-}
-
-type TopicFilter interface {
-	Validate(filter string) error
-	ValidateTopic(topic string) error
 }

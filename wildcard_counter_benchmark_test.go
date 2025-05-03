@@ -1,14 +1,17 @@
-package blazesub
+package blazesub_test
 
 import (
 	"fmt"
 	"sync"
 	"testing"
 
+	"github.com/NSXBet/blazesub"
 	"github.com/stretchr/testify/require"
 )
 
 // BenchmarkWildcardLookupFrequency benchmarks the impact of different wildcard lookup frequencies.
+//
+//nolint:gocognit // reason: complex benchmark test.
 func BenchmarkWildcardLookupFrequency(b *testing.B) {
 	// Test with different frequencies of wildcard lookups
 	frequencies := []int{0, 25, 50, 75, 100}
@@ -16,7 +19,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 	for _, frequency := range frequencies {
 		b.Run(fmt.Sprintf("WildcardLookup_%d%%", frequency), func(b *testing.B) {
 			// Setup: Create a subscription trie with a mix of exact and wildcard subscriptions
-			trie := NewSubscriptionTrie()
+			trie := blazesub.NewSubscriptionTrie()
 			handler := &mockHandler{
 				messageReceived: false,
 				mutex:           sync.Mutex{},
@@ -29,26 +32,27 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 			}
 
 			// Add 20 wildcard subscriptions
-			for i := range 20 {
+			for index := range 20 {
 				var topic string
-				if i%2 == 0 {
-					topic = fmt.Sprintf("test/+/%d/+", i)
+
+				if index%2 == 0 {
+					topic = fmt.Sprintf("test/+/%d/+", index)
 				} else {
-					topic = fmt.Sprintf("test/topic/%d/#", i)
+					topic = fmt.Sprintf("test/topic/%d/#", index)
 				}
 
-				trie.Subscribe(uint64(1000+i), topic, handler)
+				trie.Subscribe(uint64(1000+index), topic, handler)
 			}
 
 			// Create test topics with the specified frequency of wildcard lookups
 			testTopics := make([]string, 100)
-			for i := range testTopics {
-				if i < (100 - frequency) {
+			for index := range testTopics {
+				if index < (100 - frequency) {
 					// Exact match topic (already in the trie)
-					testTopics[i] = fmt.Sprintf("test/topic/%d/exact", i%1000)
+					testTopics[index] = fmt.Sprintf("test/topic/%d/exact", index%1000)
 				} else {
 					// Topic that matches wildcards
-					testTopics[i] = fmt.Sprintf("test/wildcard/%d/lookup", i%20)
+					testTopics[index] = fmt.Sprintf("test/wildcard/%d/lookup", index%20)
 				}
 			}
 
@@ -65,7 +69,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 // BenchmarkWildcardCounter measures how the atomic counter affects concurrent performance.
 func BenchmarkWildcardCounter(b *testing.B) {
 	// Create a trie with some subscriptions
-	trie := NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -78,15 +82,15 @@ func BenchmarkWildcardCounter(b *testing.B) {
 	}
 
 	// Add 50 wildcard subscriptions
-	for i := range 50 {
+	for index := range 50 {
 		var topic string
-		if i%2 == 0 {
-			topic = fmt.Sprintf("test/+/%d/exact", i)
+		if index%2 == 0 {
+			topic = fmt.Sprintf("test/+/%d/exact", index)
 		} else {
-			topic = fmt.Sprintf("test/topic/%d/#", i)
+			topic = fmt.Sprintf("test/topic/%d/#", index)
 		}
 
-		trie.Subscribe(uint64(1000+i), topic, handler)
+		trie.Subscribe(uint64(1000+index), topic, handler)
 	}
 
 	// Create a mix of topics for lookup

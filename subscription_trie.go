@@ -17,6 +17,14 @@ type TrieNode struct {
 	mutex         sync.RWMutex             // For concurrency safety
 }
 
+func (t *TrieNode) Children() map[string]*TrieNode {
+	return t.children
+}
+
+func (t *TrieNode) Subscriptions() map[uint64]*Subscription {
+	return t.subscriptions
+}
+
 // SubscriptionTrie is a trie-based structure for efficient topic subscriptions.
 type SubscriptionTrie struct {
 	root            *TrieNode
@@ -269,4 +277,8 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 	}
 
 	return result
+}
+
+func (st *SubscriptionTrie) Root() *TrieNode {
+	return st.root
 }

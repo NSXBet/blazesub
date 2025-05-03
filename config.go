@@ -1,12 +1,17 @@
 package blazesub
 
-import "time"
+import (
+	"time"
+
+	"github.com/go-logr/logr"
+)
 
 type Config struct {
 	WorkerCount      int
 	PreAlloc         bool
 	MaxBlockingTasks int
 	ExpiryDuration   time.Duration
+	Logger           logr.Logger
 }
 
 const (

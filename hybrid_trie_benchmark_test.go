@@ -1,3 +1,4 @@
+//nolint:testpackage // reason: we need to test private methods
 package blazesub
 
 import (
@@ -6,6 +7,19 @@ import (
 	"sync"
 	"testing"
 )
+
+type mockHandler struct {
+	messageReceived bool
+	mutex           sync.Mutex
+}
+
+func (m *mockHandler) OnMessage(_ *Message) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.messageReceived = true
+
+	return nil
+}
 
 // BenchmarkHybridTrieExactMatch benchmarks the performance of the hybrid trie for exact match lookups.
 func BenchmarkHybridTrieExactMatch(b *testing.B) {
@@ -51,6 +65,8 @@ func BenchmarkHybridTrieExactMatch(b *testing.B) {
 }
 
 // BenchmarkHybridVsOriginalTrie compares our hybrid implementation to a version without the exactMatches optimization.
+//
+//nolint:gocognit // reason: complex benchmark test.
 func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 	// Create data shared across both benchmarks
 	const numTopics = 1000
@@ -105,7 +121,6 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 				subscriptions: make(map[uint64]*Subscription),
 				mutex:         sync.RWMutex{},
 			},
-			exactMatches:    nil, // Setting to nil to emulate original behavior
 			exactMatchMutex: sync.RWMutex{},
 		}
 		// Initialize wildcard counter to 0
