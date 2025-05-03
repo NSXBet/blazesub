@@ -10,16 +10,17 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 - **MQTT-compatible topic matching**: Supports single-level (+) and multi-level (#) wildcards
 - **Efficient topic caching**: Optimizes repeat accesses to common topics
 - **Flexible message delivery**: Choose between worker pool or direct goroutines for optimal performance
-- **Low-latency message delivery**: Up to 56% faster with direct goroutines mode
+- **Low-latency message delivery**: Direct goroutines up to 52% faster than worker pool and 34% faster than MQTT
 
 ## Performance
 
-BlazeSub significantly outperforms traditional MQTT brokers:
+BlazeSub significantly outperforms traditional publish/subscribe systems:
 
-- **Exact match lookups**: 1,700-3,400x faster than MQTT
-- **Wildcard match lookups**: 5,200-15,600x faster than MQTT
-- **Zero allocations** for subscription matching operations
-- **Direct goroutines mode**: 45-56% faster than worker pool mode for most use cases
+- **Direct goroutines mode**: 34% faster than MochiMQTT for message publishing
+- **Concurrent performance**: 31.7% faster than MochiMQTT under high concurrent load
+- **Memory efficiency**: Uses up to 95% less memory than MochiMQTT
+- **Zero allocations** for core subscription matching operations
+- **Minimal GC impact**: Fewer allocations mean less garbage collection overhead
 
 See the [detailed benchmark report](BENCHMARK.md) for comprehensive performance metrics and [performance comparison](PERFORMANCE.md) for worker pool vs direct goroutines analysis.
 

@@ -10,36 +10,53 @@ Three benchmark scenarios were implemented to compare performance:
 2. **Concurrent Publishing Performance**: Tests how well the systems handle concurrent publishing operations.
 3. **Subscribe/Unsubscribe Operations**: Tests the efficiency of adding and removing subscriptions.
 
-The benchmarks were run on an Intel Core i9-14900KF CPU with a benchmark time of 5 seconds for more accurate results.
+The benchmarks were run on an Intel Core i9-14900KF CPU with a benchmark time of 5 seconds for more accurate results. All handlers use equivalent lock-free implementations to ensure a fair comparison.
 
 ## Benchmark Results
 
 ### 1. Basic Publish/Subscribe Performance
 
-| Implementation | Operations/sec | Time/op  | Memory/op | Allocations/op |
-| -------------- | -------------- | -------- | --------- | -------------- |
-| BlazeSub       | ~537,000 ops/s | 1,863 ns | 401 B     | 7 allocs       |
-| MochiMQTT      | ~680,000 ops/s | 1,469 ns | 2,471 B   | 13 allocs      |
+| Implementation               | Operations/sec | Time/op     | Memory/op  | Allocations/op |
+| ---------------------------- | -------------- | ----------- | ---------- | -------------- |
+| BlazeSub (Worker Pool)       | 3,506,482      | 1,830 ns/op | 187 B/op   | 6 allocs/op    |
+| BlazeSub (Direct Goroutines) | 6,627,648      | 900.9 ns/op | 261 B/op   | 10 allocs/op   |
+| MochiMQTT                    | 4,390,024      | 1,372 ns/op | 2,471 B/op | 13 allocs/op   |
 
-**Analysis**: In this basic benchmark, MochiMQTT is about 21% faster in terms of raw operation time, but uses **6.2x more memory** per operation and requires almost twice as many memory allocations, which would impact garbage collection pressure in production environments.
+**Analysis**:
 
-### 2. Concurrent Performance
+- BlazeSub with direct goroutines is 34.4% faster than MochiMQTT
+- BlazeSub with direct goroutines is 50.8% faster than BlazeSub with worker pool
+- MochiMQTT is 25.0% faster than BlazeSub with worker pool
+- Both BlazeSub implementations use significantly less memory per operation than MochiMQTT (89.4% less for direct goroutines)
 
-| Implementation | Operations/sec | Time/op  | Memory/op | Allocations/op |
-| -------------- | -------------- | -------- | --------- | -------------- |
-| BlazeSub       | ~1.76M ops/s   | 568.6 ns | 144 B     | 3 allocs       |
-| MochiMQTT      | ~2.57M ops/s   | 389.5 ns | 1,776 B   | 10 allocs      |
+### 2. Concurrent Publishing Performance
 
-**Analysis**: Under concurrent load, MochiMQTT performs about 31% faster in raw operation time, but consumes **12.3x more memory** per operation and has 3.3x more allocations. This indicates BlazeSub has much better memory efficiency.
+| Implementation               | Operations/sec | Time/op     | Memory/op  | Allocations/op |
+| ---------------------------- | -------------- | ----------- | ---------- | -------------- |
+| BlazeSub (Worker Pool)       | 11,083,462     | 534.7 ns/op | 88 B/op    | 2 allocs/op    |
+| BlazeSub (Direct Goroutines) | 34,126,406     | 255.0 ns/op | 89 B/op    | 2 allocs/op    |
+| MochiMQTT                    | 16,698,988     | 373.6 ns/op | 1,776 B/op | 10 allocs/op   |
 
-### 3. Subscribe/Unsubscribe Performance
+**Analysis**:
 
-| Implementation | Operations/sec | Time/op  | Memory/op | Allocations/op |
-| -------------- | -------------- | -------- | --------- | -------------- |
-| BlazeSub       | ~146,000 ops/s | 6,853 ns | 21,631 B  | 53 allocs      |
-| MochiMQTT      | ~626,000 ops/s | 1,596 ns | 2,484 B   | 32 allocs      |
+- Under concurrent load, BlazeSub with direct goroutines is 31.7% faster than MochiMQTT
+- BlazeSub with direct goroutines is 52.3% faster than BlazeSub with worker pool
+- MochiMQTT is 30.1% faster than BlazeSub with worker pool
+- Both BlazeSub implementations use approximately 95% less memory than MochiMQTT and make 80% fewer allocations
 
-**Analysis**: MochiMQTT is significantly faster at subscribe/unsubscribe operations (about 4.3x), but this is less important as these are typically not on the critical path for high-throughput messaging. BlazeSub uses more memory for these operations, likely due to its advanced trie structure setup.
+### 3. Subscribe/Unsubscribe Operations
+
+| Implementation               | Operations/sec | Time/op     | Memory/op   | Allocations/op |
+| ---------------------------- | -------------- | ----------- | ----------- | -------------- |
+| BlazeSub (Worker Pool)       | 1,206,195      | 4,904 ns/op | 21,630 B/op | 52 allocs/op   |
+| BlazeSub (Direct Goroutines) | 1,206,478      | 5,027 ns/op | 21,630 B/op | 52 allocs/op   |
+| MochiMQTT                    | 4,298,108      | 1,349 ns/op | 2,481 B/op  | 32 allocs/op   |
+
+**Analysis**:
+
+- MochiMQTT is significantly faster for subscribe/unsubscribe operations (72.5% faster than BlazeSub with worker pool)
+- MochiMQTT uses 88.5% less memory for these operations
+- There's little performance difference between worker pool and direct goroutines for these operations in BlazeSub
 
 ### 4. Core Matching Performance
 
@@ -53,81 +70,77 @@ Looking at the detailed benchmarks for BlazeSub's core components:
 
 ## Overall Comparison
 
-| Aspect                   | BlazeSub            | MochiMQTT            | Winner    |
-| ------------------------ | ------------------- | -------------------- | --------- |
-| Publish/Subscribe Speed  | Slightly Slower     | Slightly Faster      | MochiMQTT |
-| Concurrent Publishing    | Slower              | Faster               | MochiMQTT |
-| Subscribe/Unsubscribe    | Slower              | Faster               | MochiMQTT |
-| Memory Usage             | Extremely Efficient | Less Efficient       | BlazeSub  |
-| Memory Allocations       | Significantly Fewer | More                 | BlazeSub  |
-| Core Matching Operations | Allocation-Free     | Requires Allocations | BlazeSub  |
+| Aspect                   | BlazeSub (Worker Pool) | BlazeSub (Direct Goroutines) | MochiMQTT            | Winner                 |
+| ------------------------ | ---------------------- | ---------------------------- | -------------------- | ---------------------- |
+| Publish/Subscribe Speed  | Slowest                | Fastest                      | Middle               | BlazeSub (Direct)      |
+| Concurrent Publishing    | Slowest                | Fastest                      | Middle               | BlazeSub (Direct)      |
+| Subscribe/Unsubscribe    | Slowest                | Slowest                      | Fastest              | MochiMQTT              |
+| Memory Usage             | Very Efficient         | Very Efficient               | Less Efficient       | BlazeSub (Both)        |
+| Memory Allocations       | Fewest                 | Few                          | Most                 | BlazeSub (Worker Pool) |
+| Core Matching Operations | Allocation-Free        | Allocation-Free              | Requires Allocations | BlazeSub (Both)        |
 
 ## Key Observations
 
-1. **Memory Efficiency**: BlazeSub is dramatically more memory-efficient than MochiMQTT, with core operations using 6-12x less memory. In high-throughput systems, this means:
+1. **Direct Goroutines vs Worker Pool**: BlazeSub with direct goroutines consistently outperforms the worker pool implementation for message publishing by 50-52%, highlighting the overhead introduced by the worker pool.
+
+2. **Memory Efficiency**: Both BlazeSub implementations are dramatically more memory-efficient than MochiMQTT, using 89-95% less memory for publishing operations. In high-throughput systems, this means:
 
    - Less garbage collection pressure
    - Better cache locality
    - Lower memory usage overall
 
-2. **Allocation-Free Core Operations**: BlazeSub's core matching operations (exact and wildcard) use zero memory allocations, which is ideal for high-performance systems where GC pauses can be problematic.
+3. **Allocation-Free Core Operations**: BlazeSub's core matching operations (exact and wildcard) use zero memory allocations, which is ideal for high-performance systems where GC pauses can be problematic.
 
-3. **Raw Speed Trade-offs**: While MochiMQTT appears faster in the raw benchmarks, this is likely due to:
-
-   - Simpler data structures with less optimization for concurrency
-   - Different design goals (BlazeSub optimized for zero allocations and lock freedom)
-
-4. **Scalability**: The memory efficiency and zero-allocation design of BlazeSub would likely make it scale much better under real-world loads, especially when dealing with millions of messages.
+4. **Trade-offs in Subscribe/Unsubscribe**: MochiMQTT significantly outperforms BlazeSub for subscription management operations, though these are typically less frequent than message publishing.
 
 ## Conclusions
 
-1. **For Raw Performance**:
+1. **For Raw Publishing Performance**:
 
-   - MochiMQTT offers better raw publishing performance
-   - The performance advantage is modest (21-31%) but consistent
+   - BlazeSub with direct goroutines offers the best raw performance, being up to 34% faster than MochiMQTT
+   - The worker pool implementation of BlazeSub introduces significant overhead and is slower than MochiMQTT
 
 2. **For Resource Efficiency**:
 
-   - BlazeSub consistently uses significantly less memory (6-12x less) and makes fewer allocations
-   - This makes it more suitable for resource-constrained environments or long-running services
+   - Both BlazeSub implementations use significantly less memory (89-95% less) and make fewer allocations
+   - This makes them more suitable for resource-constrained environments or long-running services
 
 3. **For High-Scale Production**:
 
    - BlazeSub's lock-free design and zero-allocation core operations suggest better performance stability under varying loads
-   - The allocation-free design would lead to more predictable latency with fewer GC pauses
+   - Using direct goroutines instead of the worker pool provides substantial performance benefits
 
-4. **Subscribe/Unsubscribe Operations**:
-   - MochiMQTT is significantly faster at subscribe/unsubscribe operations
-   - However, these are typically less frequent than message publishing in most use cases
+4. **For Subscribe/Unsubscribe Heavy Workloads**:
+   - MochiMQTT is significantly faster and more memory efficient for subscription management
 
 ## Recommendations
 
 1. **For High-Throughput Applications**:
 
-   - If raw messaging throughput is the primary concern and memory usage is less critical, MochiMQTT may be suitable
-   - However, for sustained high throughput where GC pauses would be problematic, BlazeSub's zero-allocation design is superior
+   - For maximum throughput, use BlazeSub with direct goroutines
+   - The zero-allocation design of BlazeSub makes it superior for sustained high-throughput where GC pauses would be problematic
 
 2. **For Resource-Constrained Environments**:
 
-   - BlazeSub's significantly lower memory footprint makes it the clear choice for memory-constrained environments
+   - Both BlazeSub implementations have significantly lower memory footprints, making them good choices for memory-constrained environments
+   - The choice between worker pool and direct goroutines should be based on whether controlling goroutine creation is a concern
 
 3. **For Predictable Latency Requirements**:
 
-   - BlazeSub's allocation-free design and lock-free implementation provide more consistent performance with fewer latency spikes
+   - BlazeSub with direct goroutines provides the most consistent performance with the lowest latency
+   - The allocation-free design helps avoid GC-related latency spikes
 
-4. **For Long-Running Services**:
-   - The memory efficiency of BlazeSub translates to better long-term stability for services that must run for extended periods
+4. **For Connection-Heavy Workloads**:
+   - If your application involves frequent connection/disconnection of clients rather than sustained messaging, MochiMQTT may be more suitable
 
 ## Future Optimizations
 
-While BlazeSub already demonstrates excellent memory efficiency and lock-free operation, potential optimizations include:
+While BlazeSub already demonstrates excellent performance, potential optimizations include:
 
-1. **Publish Path Optimization**: The raw publish performance could potentially be improved while maintaining the zero-allocation advantage
+1. **Subscription Management**: The subscribe/unsubscribe operations in BlazeSub could be optimized to be more competitive with MochiMQTT
 
-2. **Subscribe/Unsubscribe Operations**: These could be optimized further, though they are less critical for overall system performance
+2. **Memory Usage in Direct Goroutines**: For large loads, direct goroutines use slightly more memory than the worker pool implementation, which could potentially be optimized
 
-3. **Latency Distribution Analysis**: Further benchmarking to measure latency distribution (not just averages) would help identify any remaining bottlenecks
+3. **Real-World Workload Testing**: Testing with realistic message patterns, payload sizes, and subscription topologies would provide additional insights
 
-4. **Real-World Workload Testing**: Testing with realistic message patterns, payload sizes, and subscription topologies would provide additional insights
-
-The current benchmarks confirm that BlazeSub achieves its design goals of providing a lock-free, memory-efficient publish/subscribe system that significantly outperforms traditional implementations in terms of resource usage while maintaining competitive throughput.
+These benchmarks confirm that BlazeSub with direct goroutines provides superior performance for high-throughput message publishing scenarios, while maintaining exceptional memory efficiency.
