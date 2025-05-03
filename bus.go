@@ -2,6 +2,7 @@ package blazesub
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,7 +16,7 @@ type MessageHandler interface {
 
 type Bus struct {
 	subID         *atomic.Uint64
-	subscriptions map[string]map[uint64][]*Subscription
+	subscriptions *SubscriptionTrie
 	subLock       sync.RWMutex
 	pubpool       *ants.Pool
 }
@@ -44,7 +45,7 @@ func NewBus(config Config) (*Bus, error) {
 
 	return &Bus{
 		subID:         atomic.NewUint64(0),
-		subscriptions: map[string]map[uint64][]*Subscription{},
+		subscriptions: NewSubscriptionTrie(),
 		subLock:       sync.RWMutex{},
 		pubpool:       pool,
 	}, nil
@@ -66,8 +67,7 @@ func (b *Bus) Close() error {
 	return nil
 }
 
-// TODO: turn data into strong type
-// TODO: error handling
+// Publish publishes a message to subscribers of the specified topic
 func (b *Bus) Publish(topic string, payload []byte) {
 	msg := &Message{
 		Topic:        topic,
@@ -75,52 +75,75 @@ func (b *Bus) Publish(topic string, payload []byte) {
 		UTCTimestamp: time.Now().UTC(),
 	}
 
-	for _, subs := range b.subscriptions[topic] {
-		for _, sub := range subs {
-			if err := b.pubpool.Submit(func() {
-				if err := sub.receiveMessage(msg); err != nil {
-					fmt.Printf("error receiving message: %s", err)
-				}
-			}); err != nil {
-				fmt.Printf("error submitting message to pool: %s", err)
+	// Find matching subscriptions using the trie
+	b.subLock.RLock()
+	matchingSubs := b.subscriptions.FindMatchingSubscriptions(topic)
+	b.subLock.RUnlock()
+
+	// Submit a task to the pool for each subscription
+	for _, sub := range matchingSubs {
+		subscription := sub // Create a local copy for the closure
+		if err := b.pubpool.Submit(func() {
+			if err := subscription.receiveMessage(msg); err != nil {
+				fmt.Printf("error receiving message: %s", err)
 			}
+		}); err != nil {
+			fmt.Printf("error submitting message to pool: %s", err)
 		}
 	}
 }
 
-func (b *Bus) addSubscription(subscription *Subscription) {
-	b.subLock.Lock()
-	defer b.subLock.Unlock()
-
-	subs, ok := b.subscriptions[subscription.Topic()]
-	if !ok {
-		subs = map[uint64][]*Subscription{}
-		b.subscriptions[subscription.Topic()] = subs
-	}
-
-	subs[subscription.ID()] = append(subs[subscription.ID()], subscription)
-}
-
+// removeSubscription removes a subscription from the trie
 func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
 	b.subLock.Lock()
 	defer b.subLock.Unlock()
 
-	subs, ok := b.subscriptions[topic]
-	if !ok {
-		return
-	}
-
-	delete(subs, subscriptionID)
+	b.subscriptions.Unsubscribe(topic, subscriptionID)
 }
 
+// Subscribe creates a new subscription for the specified topic
 func (b *Bus) Subscribe(topic string) (*Subscription, error) {
-	subscription := &Subscription{
-		id:    b.subID.Add(1),
-		topic: topic,
-		bus:   b,
-	}
+	subID := b.subID.Add(1)
 
-	b.addSubscription(subscription)
+	b.subLock.Lock()
+	defer b.subLock.Unlock()
+
+	// Use the trie's Subscribe method to create and register the subscription
+	subscription := b.subscriptions.Subscribe(subID, topic, nil)
+
+	// Set up unsubscribe function
+	unsubscribeFn := func() error {
+		b.removeSubscription(topic, subID)
+		return nil
+	}
+	subscription.SetUnsubscribeFunc(unsubscribeFn)
 
 	return subscription, nil
+}
+
+// addSubscriptionToTrie adds a subscription to the trie
+func (b *Bus) addSubscriptionToTrie(subscription *Subscription) {
+	topic := subscription.Topic()
+	segments := strings.Split(topic, "/")
+	currentNode := b.subscriptions.root
+
+	for _, segment := range segments {
+		if _, exists := currentNode.children[segment]; !exists {
+			currentNode.children[segment] = &TrieNode{
+				segment:       segment,
+				children:      make(map[string]*TrieNode),
+				subscriptions: make(map[uint64]*Subscription),
+			}
+		}
+
+		currentNode = currentNode.children[segment]
+
+		// If we reach a wildcard segment "#", it matches everything at this level and below
+		if segment == "#" {
+			break
+		}
+	}
+
+	// Add the subscription to the final node's map
+	currentNode.subscriptions[subscription.ID()] = subscription
 }

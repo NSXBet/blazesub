@@ -3,10 +3,10 @@ package blazesub
 import "fmt"
 
 type Subscription struct {
-	id      uint64
-	topic   string
-	handler MessageHandler
-	bus     *Bus
+	id            uint64
+	topic         string
+	handler       MessageHandler
+	unsubscribeFn func() error
 }
 
 func (s *Subscription) OnMessage(handler MessageHandler) {
@@ -33,8 +33,13 @@ func (s *Subscription) receiveMessage(message *Message) error {
 	return nil
 }
 
-func (s *Subscription) Unsubscribe() error {
-	s.bus.removeSubscription(s.topic, s.id)
+func (s *Subscription) SetUnsubscribeFunc(fn func() error) {
+	s.unsubscribeFn = fn
+}
 
+func (s *Subscription) Unsubscribe() error {
+	if s.unsubscribeFn != nil {
+		return s.unsubscribeFn()
+	}
 	return nil
 }

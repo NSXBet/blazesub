@@ -5,44 +5,12 @@ import (
 	"sync"
 )
 
-// TrieSubscription is a subscription used in the trie implementation
-// This is separate from the main Subscription type in subscriptions.go
-type TrieSubscription struct {
-	id            uint64
-	topic         string
-	handler       MessageHandler
-	unsubscribeFn func() error
-}
-
-// ID returns the subscription ID
-func (s *TrieSubscription) ID() uint64 {
-	return s.id
-}
-
-// Topic returns the subscription topic
-func (s *TrieSubscription) Topic() string {
-	return s.topic
-}
-
-// SetUnsubscribeFunc sets the unsubscribe function
-func (s *TrieSubscription) SetUnsubscribeFunc(fn func() error) {
-	s.unsubscribeFn = fn
-}
-
-// Unsubscribe calls the unsubscribe function
-func (s *TrieSubscription) Unsubscribe() error {
-	if s.unsubscribeFn != nil {
-		return s.unsubscribeFn()
-	}
-	return nil
-}
-
 // TrieNode represents a node in the subscription trie
 type TrieNode struct {
 	segment       string
 	children      map[string]*TrieNode
-	subscriptions map[uint64]*TrieSubscription // Map of subscriptions by ID at this node
-	mutex         sync.RWMutex                 // For concurrency safety
+	subscriptions map[uint64]*Subscription // Map of subscriptions by ID at this node
+	mutex         sync.RWMutex             // For concurrency safety
 }
 
 // SubscriptionTrie is a trie-based structure for efficient topic subscriptions
@@ -56,21 +24,21 @@ func NewSubscriptionTrie() *SubscriptionTrie {
 		root: &TrieNode{
 			segment:       "",
 			children:      make(map[string]*TrieNode),
-			subscriptions: make(map[uint64]*TrieSubscription),
+			subscriptions: make(map[uint64]*Subscription),
 		},
 	}
 }
 
-// Subscribe adds a subscription for a topic pattern with internal subscription creation
-func (st *SubscriptionTrie) Subscribe(id uint64, topic string, handler MessageHandler) *TrieSubscription {
-	// Create the subscription with unsubscribe function that references this trie
-	subscription := &TrieSubscription{
+// Subscribe adds a subscription for a topic pattern
+func (st *SubscriptionTrie) Subscribe(id uint64, topic string, handler MessageHandler) *Subscription {
+	// Create a new subscription
+	subscription := &Subscription{
 		id:      id,
 		topic:   topic,
 		handler: handler,
 	}
 
-	// Set the unsubscribe function to reference this trie
+	// Set the unsubscribe function that references this trie
 	unsubscribeFn := func() error {
 		st.Unsubscribe(topic, id)
 		return nil
@@ -88,7 +56,7 @@ func (st *SubscriptionTrie) Subscribe(id uint64, topic string, handler MessageHa
 			currentNode.children[segment] = &TrieNode{
 				segment:       segment,
 				children:      make(map[string]*TrieNode),
-				subscriptions: make(map[uint64]*TrieSubscription),
+				subscriptions: make(map[uint64]*Subscription),
 			}
 		}
 
@@ -156,17 +124,17 @@ func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
 }
 
 // FindMatchingSubscriptions returns all subscriptions that match a given topic
-func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*TrieSubscription {
+func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscription {
 	segments := strings.Split(topic, "/")
 	st.root.mutex.RLock()
 	defer st.root.mutex.RUnlock()
 
 	// Use a map to deduplicate subscriptions based on ID
-	resultMap := make(map[uint64]*TrieSubscription)
+	resultMap := make(map[uint64]*Subscription)
 	findMatches(st.root, segments, 0, resultMap)
 
 	// Convert result map to slice
-	result := make([]*TrieSubscription, 0, len(resultMap))
+	result := make([]*Subscription, 0, len(resultMap))
 	for _, sub := range resultMap {
 		result = append(result, sub)
 	}
@@ -174,7 +142,7 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*TrieSubsc
 }
 
 // findMatches recursively finds all matching subscriptions for a topic
-func findMatches(node *TrieNode, segments []string, index int, result map[uint64]*TrieSubscription) {
+func findMatches(node *TrieNode, segments []string, index int, result map[uint64]*Subscription) {
 	// If we've reached a "#" node, it matches everything at this level and below
 	if wildcard, exists := node.children["#"]; exists {
 		for id, sub := range wildcard.subscriptions {
