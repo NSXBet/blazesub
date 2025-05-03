@@ -1,11 +1,17 @@
 package blazesub_test
 
 import (
+	"log/slog"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/NSXBet/blazesub"
+	mochimqtt "github.com/mochi-mqtt/server/v2"
+	"github.com/mochi-mqtt/server/v2/hooks/auth"
+	"github.com/mochi-mqtt/server/v2/listeners"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
 
@@ -77,4 +83,47 @@ func (h *noOpHandler) OnMessage(_ *blazesub.Message) error {
 	h.MessageCount.Add(1)
 
 	return nil
+}
+
+func RunMQTTServer(tb testing.TB) *mochimqtt.Server {
+	tb.Helper()
+
+	level := new(slog.LevelVar)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	}))
+	level.Set(slog.LevelError)
+
+	server := mochimqtt.New(
+		&mochimqtt.Options{
+			InlineClient: true,
+			Capabilities: &mochimqtt.Capabilities{
+				MaximumMessageExpiryInterval: 60,
+				RetainAvailable:              0,
+				MaximumClientWritesPending:   100,
+				MaximumInflight:              100,
+			},
+			Logger: logger,
+		},
+	)
+
+	// Allow all connections.
+	_ = server.AddHook(new(auth.AllowHook), nil)
+
+	addr := "0.0.0.0:1883"
+	socket := listeners.NewTCP(listeners.Config{ID: "t1", Address: addr})
+
+	require.NoError(tb, server.AddListener(socket))
+
+	go func() {
+		if err := server.Serve(); err != nil {
+			tb.Fatalf("error running server: %s", err)
+		}
+	}()
+
+	tb.Cleanup(func() {
+		server.Close()
+	})
+
+	return server
 }
