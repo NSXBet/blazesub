@@ -57,6 +57,10 @@ func NewBusWithDefaults() (*Bus, error) {
 func (b *Bus) Close() error {
 	defer b.pubpool.Release()
 
+	for b.pubpool.Waiting() > 0 {
+		time.Sleep(time.Millisecond * 10)
+	}
+
 	// TODO: wait for all messages to be processed
 
 	return nil

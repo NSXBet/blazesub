@@ -1,6 +1,7 @@
 package blazesub_test
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -68,6 +69,19 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 			want: want{
 				"test":  {[]byte("test-data")},
 				"test2": {[]byte("test-data2")},
+			},
+		},
+		{
+			name: "can publish and subscribe to topics with slashes",
+			publish: ptp(
+				t,
+				"test/1", []byte("test-data"),
+				"test/2", []byte("test-data2"),
+			),
+			subscribe: sub(t, "test/1", "test/2"),
+			want: want{
+				"test/1": {[]byte("test-data")},
+				"test/2": {[]byte("test-data2")},
 			},
 		},
 	}
@@ -150,32 +164,93 @@ func TestSlowMessageHandler(t *testing.T) {
 	require.Equal(t, []byte("test-data"), slowHandler.MessagesReceived()["test"][0].Data)
 }
 
-type NoOpHandler struct{}
-
-var _ blazesub.MessageHandler = &NoOpHandler{}
-
-func (h *NoOpHandler) OnMessage(message *blazesub.Message) error {
-	return nil
-}
-
 func BenchmarkPublishAndSubscribe(b *testing.B) {
-	bus, err := blazesub.NewBusWithDefaults()
+	const (
+		topics      = 10
+		subscribers = 100
+	)
+
+	bus, err := blazesub.NewBus(
+		blazesub.Config{
+			WorkerCount:      10000,
+			MaxBlockingTasks: 1000000,
+			PreAlloc:         true,
+		},
+	)
 	require.NoError(b, err)
 
 	payload := []byte("test-data")
 
-	messageHandler := &NoOpHandler{}
+	messageHandler := NoOpHandler(b)
 
-	b.ResetTimer()
-
-	for i := range b.N {
-		subs, err := bus.Subscribe("test-" + strconv.Itoa(i))
+	for i := range subscribers {
+		topic := fmt.Sprintf("test/%d", i%topics)
+		subs, err := bus.Subscribe(topic)
 		require.NoError(b, err)
 
 		subs.OnMessage(messageHandler)
 	}
 
-	for i := range b.N {
-		bus.Publish("test-"+strconv.Itoa(i), payload)
+	publishedMessages := 0
+
+	for b.Loop() {
+		publishedMessages++
+
+		topic := fmt.Sprintf("test/%d", publishedMessages%topics)
+		bus.Publish(topic, payload)
 	}
+
+	b.StopTimer()
+
+	bus.Close()
+
+	expectedMessages := publishedMessages * (subscribers / topics)
+
+	require.Eventually(
+		b,
+		func() bool {
+			return int(messageHandler.MessageCount.Load()) == expectedMessages
+		},
+		time.Second*3,
+		time.Millisecond*10,
+		"expected %d messages to be published, but got %d",
+		expectedMessages,
+		messageHandler.MessageCount.Load(),
+	)
+}
+
+func BenchmarkPublishAndSubscribeWithWildcards(b *testing.B) {
+	b.Skip()
+
+	bus, err := blazesub.NewBusWithDefaults()
+	require.NoError(b, err)
+
+	payload := []byte("test-data")
+
+	messageHandler := NoOpHandler(b)
+
+	expectedMessages := int64(0)
+	subscribers := 0
+
+	for b.Loop() {
+		subs, err := bus.Subscribe("test/+")
+		require.NoError(b, err)
+
+		subs.OnMessage(messageHandler)
+
+		subs2, err := bus.Subscribe("test/#")
+		require.NoError(b, err)
+
+		subs2.OnMessage(messageHandler)
+
+		subscribers += 2
+	}
+
+	for i := range b.N {
+		expectedMessages += int64(subscribers)
+
+		bus.Publish("test/"+strconv.Itoa(i), payload)
+	}
+
+	require.Equal(b, expectedMessages, messageHandler.MessageCount.Load())
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/NSXBet/blazesub"
+	"go.uber.org/atomic"
 )
 
 type SpyHandler struct {
@@ -43,4 +44,24 @@ func SpyMessageHandler(t *testing.T) *SpyHandler {
 	t.Helper()
 
 	return &SpyHandler{}
+}
+
+type noOpHandler struct {
+	MessageCount *atomic.Int64
+}
+
+var _ blazesub.MessageHandler = &noOpHandler{}
+
+func NoOpHandler(tb testing.TB) *noOpHandler {
+	tb.Helper()
+
+	return &noOpHandler{
+		MessageCount: atomic.NewInt64(0),
+	}
+}
+
+func (h *noOpHandler) OnMessage(message *blazesub.Message) error {
+	h.MessageCount.Add(1)
+
+	return nil
 }
