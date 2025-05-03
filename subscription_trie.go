@@ -223,6 +223,38 @@ func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
 	}
 }
 
+// findMatches recursively finds all matching subscriptions for a topic
+func findMatches(node *TrieNode, segments []string, index int, result map[uint64]*Subscription) {
+	// If we've reached a "#" node, it matches everything at this level and below
+	if wildcard, exists := node.children["#"]; exists {
+		// Manually copy map entries to avoid using maps.Copy which isn't concurrency-safe
+		for id, sub := range wildcard.subscriptions {
+			result[id] = sub
+		}
+	}
+
+	// If we've processed all segments, add subscriptions at current node
+	if index >= len(segments) {
+		// Manually copy map entries to avoid using maps.Copy which isn't concurrency-safe
+		for id, sub := range node.subscriptions {
+			result[id] = sub
+		}
+		return
+	}
+
+	segment := segments[index]
+
+	// Check for exact match
+	if child, exists := node.children[segment]; exists {
+		findMatches(child, segments, index+1, result)
+	}
+
+	// Check for "+" wildcard match (matches any single segment)
+	if plus, exists := node.children["+"]; exists {
+		findMatches(plus, segments, index+1, result)
+	}
+}
+
 // FindMatchingSubscriptions returns all subscriptions that match a given topic
 func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscription {
 	// Create a map to hold results (to avoid duplicates)
@@ -236,17 +268,18 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 		if !st.wildcardExists {
 			// No wildcards in the system, just return exact matches
 			st.wildcardMutex.RUnlock()
-			st.exactMatchMutex.RUnlock()
 
 			result := make([]*Subscription, 0, len(exactSubs))
 			for _, sub := range exactSubs {
 				result = append(result, sub)
 			}
+
+			st.exactMatchMutex.RUnlock()
 			return result
 		}
 		st.wildcardMutex.RUnlock()
 
-		// Add exact matches to result
+		// Manually copy exact matches to result map rather than using maps.Copy
 		for id, sub := range exactSubs {
 			resultMap[id] = sub
 		}
@@ -272,34 +305,4 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 		result = append(result, sub)
 	}
 	return result
-}
-
-// findMatches recursively finds all matching subscriptions for a topic
-func findMatches(node *TrieNode, segments []string, index int, result map[uint64]*Subscription) {
-	// If we've reached a "#" node, it matches everything at this level and below
-	if wildcard, exists := node.children["#"]; exists {
-		for id, sub := range wildcard.subscriptions {
-			result[id] = sub
-		}
-	}
-
-	// If we've processed all segments, add subscriptions at current node
-	if index >= len(segments) {
-		for id, sub := range node.subscriptions {
-			result[id] = sub
-		}
-		return
-	}
-
-	segment := segments[index]
-
-	// Check for exact match
-	if child, exists := node.children[segment]; exists {
-		findMatches(child, segments, index+1, result)
-	}
-
-	// Check for "+" wildcard match (matches any single segment)
-	if plus, exists := node.children["+"]; exists {
-		findMatches(plus, segments, index+1, result)
-	}
 }

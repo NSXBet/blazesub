@@ -5,3 +5,7 @@ test:
 .PHONY: bench
 bench:
 	@go test -bench=. -short -benchmem
+
+.PHONY: lint
+lint:
+	@golangci-lint run --enable-all --out-format=colored-line-number --issues-exit-code=1
