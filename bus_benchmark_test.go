@@ -10,18 +10,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// NoOpAtomicHandler is a minimal message handler that just counts messages received
-// using atomic operations to be thread-safe without locking
+// using atomic operations to be thread-safe without locking.
 type NoOpAtomicHandler struct {
 	count atomic.Int64
 }
 
-func (h *NoOpAtomicHandler) OnMessage(msg *blazesub.Message) error {
+func (h *NoOpAtomicHandler) OnMessage(*blazesub.Message) error {
 	h.count.Add(1)
 	return nil
 }
 
-// BenchmarkPoolVsGoroutines compares worker pool against direct goroutines
+// BenchmarkPoolVsGoroutines compares worker pool against direct goroutines.
 func BenchmarkPoolVsGoroutines(b *testing.B) {
 	benchmarkCases := []struct {
 		name           string
@@ -62,12 +61,12 @@ func BenchmarkPoolVsGoroutines(b *testing.B) {
 
 			// Create several subscriptions with some duplication
 			// to simulate real-world scenarios
-			for i := 0; i < bc.subscriptions; i++ {
+			for i := range bc.subscriptions {
 				topic := fmt.Sprintf("test/topic/%d", i%100) // 100 unique topics max
 				topics[topic] = struct{}{}
 
-				subscription, err := bus.Subscribe(topic)
-				require.NoError(b, err)
+				subscription, serr := bus.Subscribe(topic)
+				require.NoError(b, serr)
 				subscription.OnMessage(handler)
 			}
 
@@ -84,7 +83,7 @@ func BenchmarkPoolVsGoroutines(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				// Cycle through topics
 				topic := topicList[i%topicCount]
 				bus.Publish(topic, payload)
@@ -98,7 +97,7 @@ func BenchmarkPoolVsGoroutines(b *testing.B) {
 	}
 }
 
-// BenchmarkConcurrentPoolVsGoroutines tests concurrent publishing performance
+// BenchmarkConcurrentPoolVsGoroutines tests concurrent publishing performance.
 func BenchmarkConcurrentPoolVsGoroutines(b *testing.B) {
 	benchmarkCases := []struct {
 		name          string
@@ -136,10 +135,10 @@ func BenchmarkConcurrentPoolVsGoroutines(b *testing.B) {
 			}
 
 			// Subscribe to all topics
-			for i := 0; i < bc.subscriptions; i++ {
+			for i := range bc.subscriptions {
 				topicIndex := i % len(topics)
-				subscription, err := bus.Subscribe(topics[topicIndex])
-				require.NoError(b, err)
+				subscription, serr := bus.Subscribe(topics[topicIndex])
+				require.NoError(b, serr)
 				subscription.OnMessage(handler)
 			}
 
@@ -166,7 +165,7 @@ func BenchmarkConcurrentPoolVsGoroutines(b *testing.B) {
 	}
 }
 
-// BenchmarkLatencyPoolVsGoroutines measures the latency of message delivery
+// BenchmarkLatencyPoolVsGoroutines measures the latency of message delivery.
 func BenchmarkLatencyPoolVsGoroutines(b *testing.B) {
 	benchmarkCases := []struct {
 		name          string
@@ -195,7 +194,7 @@ func BenchmarkLatencyPoolVsGoroutines(b *testing.B) {
 			done := make(chan struct{}, 1)
 
 			// Create a specialized handler that signals when a message is received
-			latencyMeasureHandler := blazesub.MessageHandlerFunc(func(msg *blazesub.Message) error {
+			latencyMeasureHandler := blazesub.MessageHandlerFunc(func(*blazesub.Message) error {
 				select {
 				case done <- struct{}{}:
 				default:
@@ -214,7 +213,7 @@ func BenchmarkLatencyPoolVsGoroutines(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				// Start timing
 				start := time.Now()
 

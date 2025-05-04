@@ -13,6 +13,14 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	MinimumWorkerCount  = 20000
+	DefaultMaxCacheSize = 2000
+
+	closeTimeout  = time.Second * 10
+	closeInterval = time.Millisecond * 10
+)
+
 type MessageHandler interface {
 	OnMessage(message *Message) error
 }
@@ -41,10 +49,7 @@ func NewBus(config Config) (*Bus, error) {
 		config.Logger = zapr.NewLogger(logger)
 	}
 
-	maxConcurrentSubscriptions := config.MaxConcurrentSubscriptions
-	if maxConcurrentSubscriptions < 10 {
-		maxConcurrentSubscriptions = 10
-	}
+	maxConcurrentSubscriptions := max(config.MaxConcurrentSubscriptions, DefaultMaxConcurrentSubscriptions)
 
 	// Create a new bus instance
 	bus := &Bus{
@@ -52,7 +57,7 @@ func NewBus(config Config) (*Bus, error) {
 		subscriptions:              NewSubscriptionTrie(),
 		logger:                     config.Logger,
 		topicCache:                 xsync.NewMap[string, []*Subscription](),
-		maxCacheSize:               2000, // Increase cache size for better hit rate
+		maxCacheSize:               DefaultMaxCacheSize,
 		maxConcurrentSubscriptions: maxConcurrentSubscriptions,
 		useGoroutinePool:           config.UseGoroutinePool,
 	}
@@ -79,10 +84,7 @@ func NewBus(config Config) (*Bus, error) {
 		}
 
 		// Set a minimum pool size for better performance
-		poolSize := config.WorkerCount
-		if poolSize < 20000 {
-			poolSize = 20000 // Ensure we have enough workers for high throughput
-		}
+		poolSize := max(config.WorkerCount, MinimumWorkerCount)
 
 		pool, err := ants.NewPool(
 			poolSize,
@@ -101,11 +103,6 @@ func NewBus(config Config) (*Bus, error) {
 func NewBusWithDefaults() (*Bus, error) {
 	return NewBus(NewConfig())
 }
-
-const (
-	closeTimeout  = time.Second * 10
-	closeInterval = time.Millisecond * 10
-)
 
 func (b *Bus) Close() error {
 	// Only release pool if it exists
@@ -126,6 +123,8 @@ func (b *Bus) Close() error {
 }
 
 // Publish publishes a message to subscribers of the specified topic.
+//
+//nolint:gocognit // reason: code is optimized for performance.
 func (b *Bus) Publish(topic string, payload []byte) {
 	// Fast path for common empty topic case
 	if topic == "" {

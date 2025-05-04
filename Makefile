@@ -1,6 +1,10 @@
 .PHONY: test
 test:
-	@gotestsum --format github-actions --format-icons=hivis --debug -- --count=1 ./...
+	@gotestsum --format github-actions --format-icons=hivis -- --count=1 ./...
+
+.PHONY: race
+race:
+	@gotestsum --format github-actions --format-icons=hivis -- --race --count=1 ./...
 
 .PHONY: bench
 bench:

@@ -8,10 +8,10 @@ type Subscription struct {
 	unsubscribeFn func() error
 }
 
-// MessageHandlerFunc is a function type that implements MessageHandler interface
+// MessageHandlerFunc is a function type that implements MessageHandler interface.
 type MessageHandlerFunc func(message *Message) error
 
-// OnMessage implements MessageHandler interface
+// OnMessage implements MessageHandler interface.
 func (f MessageHandlerFunc) OnMessage(message *Message) error {
 	return f(message)
 }

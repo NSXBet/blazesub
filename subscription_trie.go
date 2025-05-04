@@ -8,7 +8,10 @@ import (
 )
 
 // DefaultExactMatchesCapacity is the default pre-allocation capacity for the exact matches map.
-const DefaultExactMatchesCapacity = 1024
+const (
+	DefaultExactMatchesCapacity = 1024
+	DefaultMaxResultCacheSize   = 10000
+)
 
 // TrieNode represents a node in the subscription trie.
 type TrieNode struct {
@@ -48,7 +51,7 @@ func NewSubscriptionTrie() *SubscriptionTrie {
 		exactMatches:       xsync.NewMap[string, *xsync.Map[uint64, *Subscription]](),
 		segmentCache:       xsync.NewMap[string, []string](),
 		resultCache:        xsync.NewMap[string, []*Subscription](),
-		maxResultCacheSize: 10000, // Cache up to 10000 results
+		maxResultCacheSize: DefaultMaxResultCacheSize,
 	}
 
 	// Initialize atomic counter to 0
@@ -62,7 +65,7 @@ func hasWildcard(pattern string) bool {
 	return strings.ContainsAny(pattern, "+#")
 }
 
-// getSplitTopicCached returns cached segments if available, otherwise splits and caches
+// getSplitTopicCached returns cached segments if available, otherwise splits and caches.
 func (st *SubscriptionTrie) getSplitTopicCached(topic string) []string {
 	if cachedSegments, ok := st.segmentCache.Load(topic); ok {
 		return cachedSegments
@@ -224,13 +227,7 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 	}
 }
 
-// cleanupEmptyNodes removes nodes that have no subscriptions and no children.
-// This is the old implementation kept for compatibility.
-func cleanupEmptyNodes(nodePath []*TrieNode, segments []string) {
-	cleanupEmptyNodesOptimized(nodePath, segments)
-}
-
-// cleanupEmptyNodesOptimized is an optimized version that avoids Range calls
+// cleanupEmptyNodesOptimized is an optimized version that avoids Range calls.
 func cleanupEmptyNodesOptimized(nodePath []*TrieNode, segments []string) {
 	for i := len(nodePath) - 1; i >= 0; i-- {
 		parentNode := nodePath[i]
@@ -353,17 +350,13 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 	segments := st.getSplitTopicCached(topic)
 
 	// Pre-allocate a result slice to avoid resizing
-	estimatedSize := int(wildcardCount) + len(resultMap)
-	if estimatedSize > 1000 {
-		// Cap it to a reasonable size to avoid huge allocations
-		estimatedSize = 1000
-	}
+	estimatedSize := min(int(wildcardCount)+len(resultMap), int(st.maxResultCacheSize))
 
 	// Search the trie for wildcard matches
 	findMatches(st.root, segments, 0, resultMap)
 
 	// Convert result map to slice with pre-allocated capacity
-	result := make([]*Subscription, 0, len(resultMap))
+	result := make([]*Subscription, 0, estimatedSize)
 	for _, sub := range resultMap {
 		result = append(result, sub)
 	}

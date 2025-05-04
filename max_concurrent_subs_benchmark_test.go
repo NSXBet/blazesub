@@ -56,9 +56,9 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 					// Subscribe to the same topic multiple times
 					// This simulates having many subscribers for a single topic
 					const topic = "test/topic/with/many/subscribers"
-					for i := 0; i < subCount; i++ {
-						subscription, err := bus.Subscribe(topic)
-						require.NoError(b, err)
+					for range subCount {
+						subscription, serr := bus.Subscribe(topic)
+						require.NoError(b, serr)
 						subscription.OnMessage(handler)
 					}
 
@@ -73,7 +73,7 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 					b.ReportAllocs()
 
 					// Run the benchmark - publish to the topic with many subscribers
-					for i := 0; i < b.N; i++ {
+					for range b.N {
 						bus.Publish(topic, payload)
 					}
 
@@ -86,7 +86,7 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	}
 }
 
-// Small load benchmark for detailed analysis
+// Small load benchmark for detailed analysis.
 func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 	// More granular values for detailed analysis
 	subscriberCount := 1000 // Fixed at 1000 subscribers
@@ -117,9 +117,9 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 				handler := &NoOpAtomicHandler{}
 				const topic = "test/topic/with/many/subscribers"
 
-				for i := 0; i < subscriberCount; i++ {
-					subscription, err := bus.Subscribe(topic)
-					require.NoError(b, err)
+				for range subscriberCount {
+					subscription, serr := bus.Subscribe(topic)
+					require.NoError(b, serr)
 					subscription.OnMessage(handler)
 				}
 
@@ -129,7 +129,7 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 				b.ResetTimer()
 				b.ReportAllocs()
 
-				for i := 0; i < b.N; i++ {
+				for range b.N {
 					bus.Publish(topic, payload)
 				}
 
