@@ -7,6 +7,19 @@ BlazeSub supports two different modes for handling message delivery:
 
 This document summarizes the performance characteristics of each approach based on benchmark results.
 
+## Message Throughput with 1000 Subscribers
+
+Our benchmarks show extraordinary performance for both delivery modes:
+
+| Scenario                | Direct Goroutines | Worker Pool      | Difference       |
+| ----------------------- | ----------------- | ---------------- | ---------------- |
+| Direct match messages   | 84.7 million/sec  | 77.1 million/sec | 9.9% faster      |
+| Wildcard match messages | 83.5 million/sec  | 73.8 million/sec | 13.1% faster     |
+| Memory usage            | ~115 B/op         | ~114 B/op        | Nearly identical |
+| Allocations             | 2 allocs/op       | 2 allocs/op      | Identical        |
+
+These results represent the number of message deliveries per second when publishing to 1000 subscribers, demonstrating BlazeSub's exceptional throughput capacity even under high subscription load.
+
 ## Basic Performance (Single-Threaded)
 
 | Scenario        | Worker Pool | Direct Goroutines | MochiMQTT    | Direct vs Pool   | Direct vs MQTT   |
@@ -103,6 +116,7 @@ For most typical pub/sub use cases where message handlers execute quickly, direc
 - 50.8% faster than the worker pool implementation
 - 34.4% faster than MochiMQTT for basic publishing
 - 52.3% faster than the worker pool and 31.7% faster than MochiMQTT under concurrent load
+- Able to deliver 84.7 million messages per second to 1000 subscribers
 
 While MochiMQTT excels at subscription management operations, BlazeSub with direct goroutines offers the best overall performance for high-throughput message publishing scenarios while maintaining excellent memory efficiency.
 

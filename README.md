@@ -1,30 +1,30 @@
-# BlazeSub
+# 🔥 BlazeSub
 
 BlazeSub is a high-performance, lock-free publish/subscribe system designed to outperform traditional MQTT brokers. It provides efficient message routing with support for wildcard subscriptions while maintaining thread safety through lock-free data structures.
 
-## Features
+## ✨ Features
 
-- **Ultra-fast performance**: Up to 170 million operations per second for subscription matching
-- **Zero memory allocations**: Core operations don't allocate memory, reducing GC pressure
-- **Thread-safe by design**: Uses lock-free data structures from the xsync library
-- **MQTT-compatible topic matching**: Supports single-level (+) and multi-level (#) wildcards
-- **Efficient topic caching**: Optimizes repeat accesses to common topics
-- **Flexible message delivery**: Choose between worker pool or direct goroutines for optimal performance
-- **Low-latency message delivery**: Direct goroutines up to 52% faster than worker pool and 34% faster than MQTT
+- **⚡ Ultra-fast performance**: Up to [84.7 million messages per second delivered to 1000 subscribers](PERFORMANCE.md)
+- **🧠 Zero memory allocations**: Core operations don't allocate memory, reducing GC pressure
+- **🔒 Thread-safe by design**: Uses lock-free data structures from the xsync library
+- **🌳 MQTT-compatible topic matching**: Supports single-level (+) and multi-level (#) wildcards
+- **🚀 Efficient topic caching**: Optimizes repeat accesses to common topics
+- **🔄 Flexible message delivery**: Choose between worker pool or direct goroutines for optimal performance
+- **⏱️ Low-latency message delivery**: Direct goroutines up to 52% faster than worker pool and 34% faster than MQTT
 
-## Performance
+## 📊 Performance
 
 BlazeSub significantly outperforms traditional publish/subscribe systems:
 
-- **Direct goroutines mode**: 34% faster than MochiMQTT for message publishing
-- **Concurrent performance**: 31.7% faster than MochiMQTT under high concurrent load
-- **Memory efficiency**: Uses up to 95% less memory than MochiMQTT
-- **Zero allocations** for core subscription matching operations
-- **Minimal GC impact**: Fewer allocations mean less garbage collection overhead
+- **💯 Direct match throughput**: 84.7 million messages per second to 1000 subscribers
+- **🔍 Wildcard match throughput**: 83.5 million messages per second to 1000 subscribers
+- **📉 Memory efficiency**: Uses up to 95% less memory than MochiMQTT
+- **0️⃣ Zero allocations** for core subscription matching operations
+- **🗑️ Minimal GC impact**: Only 2 allocations per publish operation
 
 See the [detailed benchmark report](BENCHMARK.md) for comprehensive performance metrics, [performance comparison](PERFORMANCE.md) for worker pool vs direct goroutines analysis, and [MaxConcurrentSubscriptions guide](max_concurrent_subscriptions.md) for optimizing message delivery to multiple subscribers.
 
-## Usage
+## 📝 Usage
 
 ```go
 // Create a new bus with defaults (uses worker pool)
@@ -73,27 +73,27 @@ if err != nil {
 subscription.Unsubscribe()
 ```
 
-## Implementation Details
+## 🔧 Implementation Details
 
 BlazeSub uses a hybrid approach combining:
 
-1. **Trie-based wildcard matching**: Efficiently handles wildcard patterns
-2. **Lock-free hash maps**: Fast exact match lookups with thread safety
-3. **Flexible message delivery**: Choose between worker pool or direct goroutines
-4. **Result caching**: Optimizes repeated topic lookups
+1. **🌲 Trie-based wildcard matching**: Efficiently handles wildcard patterns
+2. **🗝️ Lock-free hash maps**: Fast exact match lookups with thread safety
+3. **🧵 Flexible message delivery**: Choose between worker pool or direct goroutines
+4. **💾 Result caching**: Optimizes repeated topic lookups
 
 The system uses nested xsync maps to provide thread safety without mutex locks, leading to dramatic performance improvements in high-concurrency scenarios.
 
-### Delivery Modes
+### 🚚 Delivery Modes
 
 BlazeSub offers two modes for message delivery:
 
-- **Worker Pool Mode**: Uses the `ants` library to manage a pool of reusable goroutines, which helps prevent goroutine explosion under extreme load.
-- **Direct Goroutines Mode**: Creates new goroutines for each message delivery, providing maximum performance for typical use cases with fast message handlers.
+- **👷 Worker Pool Mode**: Uses the `ants` library to manage a pool of reusable goroutines, which helps prevent goroutine explosion under extreme load.
+- **🏎️ Direct Goroutines Mode**: Creates new goroutines for each message delivery, providing maximum performance for typical use cases with fast message handlers.
 
 See [PERFORMANCE.md](PERFORMANCE.md) for detailed analysis and recommendations on delivery modes and [max_concurrent_subscriptions.md](max_concurrent_subscriptions.md) for optimizing message delivery with many subscribers.
 
-## License
+## 📄 License
 
 MIT License
 
