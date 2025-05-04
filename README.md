@@ -6,15 +6,13 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 
 - **⚡ Ultra-fast performance**: Up to [84.7 million messages per second delivered to 1000 subscribers](PERFORMANCE.md)
 - **🧠 Zero memory allocations**: Core operations don't allocate memory, reducing GC pressure
-- **🔒 Thread-safe by design**: Uses lock-free data structures from the xsync library
+- **🔒 Thread-safe by design**: Uses lock-free data structures for maximum concurrency
 - **🌳 MQTT-compatible topic matching**: Supports single-level (+) and multi-level (#) wildcards
 - **🚀 Efficient topic caching**: Optimizes repeat accesses to common topics
 - **🔄 Flexible message delivery**: Choose between worker pool or direct goroutines for optimal performance
 - **⏱️ Low-latency message delivery**: Direct goroutines up to 52% faster than worker pool and 34% faster than MQTT
 
-## 📊 Performance
-
-BlazeSub significantly outperforms traditional publish/subscribe systems:
+## 📊 Performance Highlights
 
 - **💯 Direct match throughput**: 84.7 million messages per second to 1000 subscribers
 - **🔍 Wildcard match throughput**: 83.5 million messages per second to 1000 subscribers
@@ -22,31 +20,21 @@ BlazeSub significantly outperforms traditional publish/subscribe systems:
 - **0️⃣ Zero allocations** for core subscription matching operations
 - **🗑️ Minimal GC impact**: Only 2 allocations per publish operation
 
-See the [detailed benchmark report](BENCHMARK.md) for comprehensive performance metrics, [performance comparison](PERFORMANCE.md) for worker pool vs direct goroutines analysis, and [MaxConcurrentSubscriptions guide](max_concurrent_subscriptions.md) for optimizing message delivery to multiple subscribers.
+## 📘 Documentation
 
-## 📝 Usage
+- [**User Guide**](USER_GUIDE.md) - Comprehensive guide for using BlazeSub
+- [**Performance Analysis**](PERFORMANCE.md) - Detailed performance metrics and comparisons
+- [**MaxConcurrentSubscriptions Guide**](max_concurrent_subscriptions.md) - Optimizing message delivery to multiple subscribers
+
+## 📝 Quick Start
 
 ```go
-// Create a new bus with defaults (uses worker pool)
+// Create a new bus with defaults
 bus, err := blazesub.NewBusWithDefaults()
 if err != nil {
     log.Fatal(err)
 }
 defer bus.Close()
-
-// Or create with custom configuration
-config := blazesub.Config{
-    // Set to false for maximum performance with direct goroutines
-    UseGoroutinePool: false,
-    // Tune this for optimal performance with many subscribers per topic
-    MaxConcurrentSubscriptions: 50,
-    // Other configuration options...
-}
-fastBus, err := blazesub.NewBus(config)
-if err != nil {
-    log.Fatal(err)
-}
-defer fastBus.Close()
 
 // Subscribe to a topic
 subscription, err := bus.Subscribe("sensors/temperature")
@@ -56,42 +44,35 @@ if err != nil {
 
 // Handle messages
 subscription.OnMessage(func(msg *blazesub.Message) error {
-    fmt.Printf("Received message on %s: %s\n", msg.Topic, string(msg.Data))
+    fmt.Printf("Received: %s\n", string(msg.Data))
     return nil
 })
 
 // Publish to a topic
 bus.Publish("sensors/temperature", []byte("25.5"))
 
-// Subscribe with wildcards
-wildcard, err := bus.Subscribe("sensors/+/status")
-if err != nil {
-    log.Fatal(err)
-}
-
-// Unsubscribe when done
+// When done
 subscription.Unsubscribe()
 ```
 
-## 🔧 Implementation Details
+For optimal performance, consider using direct goroutines:
 
-BlazeSub uses a hybrid approach combining:
+```go
+config := blazesub.Config{
+    UseGoroutinePool: false,  // Use direct goroutines for max performance
+    MaxConcurrentSubscriptions: 50,  // Optimal for most workloads
+}
+bus, err := blazesub.NewBus(config)
+```
 
-1. **🌲 Trie-based wildcard matching**: Efficiently handles wildcard patterns
-2. **🗝️ Lock-free hash maps**: Fast exact match lookups with thread safety
-3. **🧵 Flexible message delivery**: Choose between worker pool or direct goroutines
-4. **💾 Result caching**: Optimizes repeated topic lookups
+## 🔧 Key Configuration Options
 
-The system uses nested xsync maps to provide thread safety without mutex locks, leading to dramatic performance improvements in high-concurrency scenarios.
+| Option                     | Purpose           | Recommendation                                 |
+| -------------------------- | ----------------- | ---------------------------------------------- |
+| UseGoroutinePool           | Delivery mode     | `false` for speed, `true` for resource control |
+| MaxConcurrentSubscriptions | Delivery batching | Keep below your subscriber count               |
 
-### 🚚 Delivery Modes
-
-BlazeSub offers two modes for message delivery:
-
-- **👷 Worker Pool Mode**: Uses the `ants` library to manage a pool of reusable goroutines, which helps prevent goroutine explosion under extreme load.
-- **🏎️ Direct Goroutines Mode**: Creates new goroutines for each message delivery, providing maximum performance for typical use cases with fast message handlers.
-
-See [PERFORMANCE.md](PERFORMANCE.md) for detailed analysis and recommendations on delivery modes and [max_concurrent_subscriptions.md](max_concurrent_subscriptions.md) for optimizing message delivery with many subscribers.
+See the [User Guide](USER_GUIDE.md) for detailed configuration information.
 
 ## 📄 License
 
