@@ -42,5 +42,5 @@ jobs:
 
       - name: Update Go pkg.go.dev
         run: |
-          go install github.com/shurcooL/pkgsite-update@latest
-          pkgsite-update github.com/NSXBet/blazesub@${GITHUB_REF_NAME}
+          ESCAPED_MODULE=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')
+          curl https://proxy.golang.org/github.com/$ESCAPED_MODULE/@v/$GITHUB_REF_NAME.info
