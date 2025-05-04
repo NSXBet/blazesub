@@ -88,10 +88,7 @@ BlazeSub uses [GoReleaser](https://goreleaser.com/) for streamlined releases. To
    - Build and validate the release
    - Generate documentation archive
    - Create GitHub release with release notes
-   - Sign the release with GPG
    - Update pkg.go.dev
-
-Maintainers need access to the `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets for signed releases.
 
 ## 📄 License
 
