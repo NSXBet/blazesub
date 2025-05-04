@@ -18,6 +18,8 @@ func (m *mockMsgHandler) OnMessage(_ *blazesub.Message) error {
 }
 
 // BenchmarkBusVsMQTT compares the performance of the blazesub Bus vs embedded MQTT server.
+//
+//nolint:gocognit // reason: benchmark test code.
 func BenchmarkBusVsMQTT(b *testing.B) {
 	// Common benchmark parameters
 	const (
@@ -26,7 +28,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 	)
 
 	exactTopics := make([]string, numTopics)
-	for i := 0; i < numTopics; i++ {
+	for i := range numTopics {
 		exactTopics[i] = fmt.Sprintf("test/topic/%d/exact", i)
 	}
 
@@ -70,11 +72,11 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		}()
 
 		// Create subscriptions - exact matches
-		for i := 0; i < numSubscriptions-5; i++ {
+		for i := range numSubscriptions - 5 {
 			topicIndex := i % numTopics
 			topic := exactTopics[topicIndex]
-			sub, err := bus.Subscribe(topic)
-			require.NoError(b, err)
+			sub, serr := bus.Subscribe(topic)
+			require.NoError(b, serr)
 
 			// Set a handler
 			handler := &mockMsgHandler{}
@@ -83,8 +85,8 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 
 		// Add some wildcard subscriptions
 		for _, wildcardTopic := range wildcardTopics {
-			sub, err := bus.Subscribe(wildcardTopic)
-			require.NoError(b, err)
+			sub, serr := bus.Subscribe(wildcardTopic)
+			require.NoError(b, serr)
 
 			// Set a handler
 			handler := &mockMsgHandler{}
@@ -95,7 +97,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := publishTopics[i%len(publishTopics)]
 			bus.Publish(topic, payload)
 		}
@@ -117,11 +119,11 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		}()
 
 		// Create subscriptions - exact matches
-		for i := 0; i < numSubscriptions-5; i++ {
+		for i := range numSubscriptions - 5 {
 			topicIndex := i % numTopics
 			topic := exactTopics[topicIndex]
-			sub, err := bus.Subscribe(topic)
-			require.NoError(b, err)
+			sub, serr := bus.Subscribe(topic)
+			require.NoError(b, serr)
 
 			// Set a handler
 			handler := &mockMsgHandler{}
@@ -130,8 +132,8 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 
 		// Add some wildcard subscriptions
 		for _, wildcardTopic := range wildcardTopics {
-			sub, err := bus.Subscribe(wildcardTopic)
-			require.NoError(b, err)
+			sub, serr := bus.Subscribe(wildcardTopic)
+			require.NoError(b, serr)
 
 			// Set a handler
 			handler := &mockMsgHandler{}
@@ -142,7 +144,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := publishTopics[i%len(publishTopics)]
 			bus.Publish(topic, payload)
 		}
@@ -152,10 +154,10 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 	b.Run("MQTT", func(b *testing.B) {
 		// Create a new MQTT server
 		mqttServer := RunMQTTServer(b)
-		noop := func(cl *mochimqtt.Client, sub packets.Subscription, pk packets.Packet) {}
+		noop := func(*mochimqtt.Client, packets.Subscription, packets.Packet) {}
 
 		// Create subscriptions - exact matches
-		for i := 0; i < numSubscriptions-5; i++ {
+		for i := range numSubscriptions - 5 {
 			topicIndex := i % numTopics
 			topic := exactTopics[topicIndex]
 
@@ -173,7 +175,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := publishTopics[i%len(publishTopics)]
 
 			// Publish directly using the server
@@ -192,7 +194,7 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 
 	// Create topics
 	topics := make([]string, numTopics)
-	for i := 0; i < numTopics; i++ {
+	for i := range numTopics {
 		topics[i] = fmt.Sprintf("test/concurrent/%d", i)
 	}
 
@@ -216,8 +218,8 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 
 		// Create subscriptions
 		for _, topic := range topics {
-			sub, err := bus.Subscribe(topic)
-			require.NoError(b, err)
+			sub, serr := bus.Subscribe(topic)
+			require.NoError(b, serr)
 
 			// Set a handler
 			handler := &mockMsgHandler{}
@@ -253,8 +255,8 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 
 		// Create subscriptions
 		for _, topic := range topics {
-			sub, err := bus.Subscribe(topic)
-			require.NoError(b, err)
+			sub, serr := bus.Subscribe(topic)
+			require.NoError(b, serr)
 
 			// Set a handler
 			handler := &mockMsgHandler{}
@@ -277,7 +279,7 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 	b.Run("MQTT_Concurrent", func(b *testing.B) {
 		// Create a new MQTT server
 		mqttServer := RunMQTTServer(b)
-		noop := func(cl *mochimqtt.Client, sub packets.Subscription, pk packets.Packet) {}
+		noop := func(*mochimqtt.Client, packets.Subscription, packets.Packet) {}
 
 		// Create subscriptions
 		for _, topic := range topics {
@@ -307,6 +309,8 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 }
 
 // BenchmarkBusVsMQTTSubscribeUnsubscribe compares the performance of subscribe/unsubscribe operations.
+//
+//nolint:gocognit // reason: benchmark test code.
 func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 	// Benchmark for BlazeSub Bus with worker pool
 	b.Run("BlazeSub_WorkerPool_SubscribeUnsubscribe", func(b *testing.B) {
@@ -325,13 +329,13 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := fmt.Sprintf("test/sub/%d", i)
 
 			// Subscribe
-			sub, err := bus.Subscribe(topic)
-			if err != nil {
-				b.Fatalf("Failed to subscribe: %v", err)
+			sub, serr := bus.Subscribe(topic)
+			if serr != nil {
+				b.Fatalf("Failed to subscribe: %v", serr)
 			}
 
 			// Set a handler
@@ -363,13 +367,13 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := fmt.Sprintf("test/sub/%d", i)
 
 			// Subscribe
-			sub, err := bus.Subscribe(topic)
-			if err != nil {
-				b.Fatalf("Failed to subscribe: %v", err)
+			sub, serr := bus.Subscribe(topic)
+			if serr != nil {
+				b.Fatalf("Failed to subscribe: %v", serr)
 			}
 
 			// Set a handler
@@ -388,11 +392,11 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 	b.Run("MQTT_SubscribeUnsubscribe", func(b *testing.B) {
 		// Create a new MQTT server
 		mqttServer := RunMQTTServer(b)
-		noop := func(cl *mochimqtt.Client, sub packets.Subscription, pk packets.Packet) {}
+		noop := func(*mochimqtt.Client, packets.Subscription, packets.Packet) {}
 
 		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for i := range b.N {
 			topic := fmt.Sprintf("test/sub/%d", i)
 
 			// Subscribe

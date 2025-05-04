@@ -123,8 +123,6 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 				subscriptions: xsync.NewMap[uint64, *Subscription](),
 			},
 		}
-		// Initialize wildcard counter to 0
-		trie.wildcardCount.Store(0)
 
 		// Populate subscriptions (adding only to the trie, not the map)
 		for index := range numSubscriptions {

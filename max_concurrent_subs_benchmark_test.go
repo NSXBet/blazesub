@@ -2,6 +2,7 @@ package blazesub_test
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -22,17 +23,15 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	}
 
 	// Test different subscription loads
-	subscriberCounts := []int{10, 100, 500, 1000, 2000, 5000}
+	subscriberCounts := []int{100, 1000}
+
+	if os.Getenv("SLOW_BENCHMARKS") == "true" {
+		subscriberCounts = []int{10, 100, 500, 1000, 2000, 5000}
+	}
 
 	for _, mode := range poolModes {
 		for _, subCount := range subscriberCounts {
-			for _, maxConcurrent := range []int{subCount / 2, subCount, subCount * 2} {
-				// Only run tests where maxConcurrent makes sense for the subscriber count
-				// (no point testing maxConcurrent=5000 with only 10 subscribers)
-				if maxConcurrent > subCount*2 {
-					continue
-				}
-
+			for _, maxConcurrent := range []int{subCount / 2, subCount * 2} {
 				benchName := fmt.Sprintf("%s/Subscribers=%d/MaxConcurrent=%d",
 					mode.name, subCount, maxConcurrent)
 
@@ -56,9 +55,9 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 					// Subscribe to the same topic multiple times
 					// This simulates having many subscribers for a single topic
 					const topic = "test/topic/with/many/subscribers"
-					for i := 0; i < subCount; i++ {
-						subscription, err := bus.Subscribe(topic)
-						require.NoError(b, err)
+					for range subCount {
+						subscription, serr := bus.Subscribe(topic)
+						require.NoError(b, serr)
 						subscription.OnMessage(handler)
 					}
 
@@ -73,7 +72,7 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 					b.ReportAllocs()
 
 					// Run the benchmark - publish to the topic with many subscribers
-					for i := 0; i < b.N; i++ {
+					for range b.N {
 						bus.Publish(topic, payload)
 					}
 
@@ -86,7 +85,7 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	}
 }
 
-// Small load benchmark for detailed analysis
+// Small load benchmark for detailed analysis.
 func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 	// More granular values for detailed analysis
 	subscriberCount := 1000 // Fixed at 1000 subscribers
@@ -117,9 +116,9 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 				handler := &NoOpAtomicHandler{}
 				const topic = "test/topic/with/many/subscribers"
 
-				for i := 0; i < subscriberCount; i++ {
-					subscription, err := bus.Subscribe(topic)
-					require.NoError(b, err)
+				for range subscriberCount {
+					subscription, serr := bus.Subscribe(topic)
+					require.NoError(b, serr)
 					subscription.OnMessage(handler)
 				}
 
@@ -129,7 +128,7 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 				b.ResetTimer()
 				b.ReportAllocs()
 
-				for i := 0; i < b.N; i++ {
+				for range b.N {
 					bus.Publish(topic, payload)
 				}
 

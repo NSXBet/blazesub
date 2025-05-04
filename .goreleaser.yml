@@ -1,0 +1,93 @@
+project_name: blazesub
+
+# This is a library, so we skip building binaries
+builds:
+  - skip: true
+
+# Archives configuration (for documentation, examples, etc.)
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_docs"
+    files:
+      - README.md
+      - LICENSE
+      - USER_GUIDE.md
+      - PERFORMANCE.md
+      - BENCHMARK.md
+      - benchmark_comparison.md
+      - benchmark_analysis.md
+      - hybrid_trie_optimization.md
+      - subscription_trie_cleanup.md
+      - max_concurrent_subscriptions.md
+
+# Checksum configuration
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# Release notes configuration
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+
+# Git configuration
+git:
+  tag_sort: -version:refname
+
+# Enable GoReleaser to push your release to GitHub
+release:
+  github:
+    owner: NSXBet
+    name: blazesub
+  prerelease: auto
+  draft: false
+  name_template: "BlazeSub {{ .Version }}"
+  header: |
+    # BlazeSub {{ .Version }}
+
+    A high-performance publish-subscribe system with efficient topic matching using a subscription trie.
+
+    ## Documentation
+
+    - [User Guide](USER_GUIDE.md)
+    - [Performance Details](PERFORMANCE.md)
+    - [Benchmark Results](BENCHMARK.md)
+
+  footer: |
+    ## Thanks
+
+    Thanks to all contributors who helped make this release possible!
+
+    For more details about this release, check the [changelog](CHANGELOG.md).
+
+# Signing configuration (optional)
+# To use this, you'll need to set up a GPG key and export it as an environment variable
+signs:
+  - artifacts: checksum
+    args:
+      [
+        "--batch",
+        "-u",
+        "{{ .Env.GPG_FINGERPRINT }}",
+        "--output",
+        "${signature}",
+        "--detach-sign",
+        "${artifact}",
+      ]
+    signature: "${artifact}.sig"
+    cmd: gpg
+
+# GitHub Actions specific configuration
+github_urls:
+  download: https://github.com/NSXBet/blazesub/releases/download
+
+# Social media announcements after release (optional)
+announce:
+  skip: true

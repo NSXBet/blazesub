@@ -2,7 +2,6 @@ package blazesub_test
 
 import (
 	"strconv"
-	"sync"
 	"testing"
 
 	"github.com/NSXBet/blazesub"
@@ -12,10 +11,7 @@ import (
 func TestTrieUnsubscribeTable(t *testing.T) {
 	t.Parallel()
 
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	tests := []struct {
 		name          string
@@ -239,10 +235,8 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 func TestUnsubscribeMaintainsMemory(t *testing.T) {
 	t.Parallel()
 
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
+
 	trie := blazesub.NewSubscriptionTrie()
 
 	// Add a lot of subscriptions with a common prefix
@@ -286,10 +280,7 @@ func TestUnsubscribeMaintainsMemory(t *testing.T) {
 func TestResubscribePerformance(t *testing.T) {
 	t.Parallel()
 
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 	trie := blazesub.NewSubscriptionTrie()
 
 	// First, let's add 100 subscriptions

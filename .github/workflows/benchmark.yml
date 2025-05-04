@@ -1,0 +1,208 @@
+name: BlazeSub Performance Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-branch
+
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-branch
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run benchmarks on main branch
+        run: |
+          cd main-branch
+          go test -bench="BenchmarkThroughputWith1000Subscribers|BenchmarkPoolVsGoroutines/LargeLoad_|BenchmarkMaxConcurrentSubscriptionsDetailed" -benchmem -count=5 -run=^$ | tee ../main-benchmarks.txt
+
+      - name: Run benchmarks on PR branch
+        run: |
+          cd pr-branch
+          go test -bench="BenchmarkThroughputWith1000Subscribers|BenchmarkPoolVsGoroutines/LargeLoad_|BenchmarkMaxConcurrentSubscriptionsDetailed" -benchmem -count=5 -run=^$ | tee ../pr-benchmarks.txt
+
+      - name: Compare benchmarks
+        id: compare
+        run: |
+          OUTPUT=$(benchstat main-benchmarks.txt pr-benchmarks.txt)
+          echo "BENCHMARK_COMPARISON<<EOF" >> $GITHUB_ENV
+          echo "$OUTPUT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+          # Check for significant performance degradation (more than 10% slower)
+          if echo "$OUTPUT" | grep -E "[1-9][0-9]\.[0-9]%" | grep -E "slower|larger|more" > degraded.txt; then
+            echo "DEGRADED=true" >> $GITHUB_ENV
+            echo "DEGRADED_RESULTS<<EOF" >> $GITHUB_ENV
+            cat degraded.txt >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          else
+            echo "DEGRADED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Delete previous benchmark comments
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all PR comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Find and delete previous benchmark result comments from this workflow
+            for (const comment of comments.data) {
+              if (comment.body.includes('## 🚀 Performance Benchmark Results') && 
+                  comment.user.login === 'github-actions[bot]') {
+                console.log(`Deleting previous benchmark comment ID ${comment.id}`);
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                });
+              }
+            }
+
+      - name: Post benchmark results as comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const degraded = process.env.DEGRADED === 'true';
+            const benchmark_comparison = process.env.BENCHMARK_COMPARISON;
+            const degraded_results = process.env.DEGRADED_RESULTS || '';
+
+            let body = `## 🚀 Performance Benchmark Results\n\n`;
+
+            if (degraded) {
+              body += `### ⚠️ Performance Degradations Detected\n\n`;
+              body += `The following benchmarks show significant performance degradation:\n\n`;
+              body += '```\n' + degraded_results + '\n```\n\n';
+              body += `Please review these changes to ensure they're acceptable or make optimizations before merging.\n\n`;
+            } else {
+              body += `### ✅ No Significant Performance Degradations\n\n`;
+              body += `Great job! Your changes maintain or improve the performance profile.\n\n`;
+            }
+
+            body += `### Detailed Benchmark Comparison\n\n`;
+            body += '```\n' + benchmark_comparison + '\n```\n\n';
+            body += `*Note: lower is better for ns/op, B/op, and allocs/op. Higher is better for msg/s.*`;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+            // If there's degradation, warn but don't fail the workflow
+            if (degraded) {
+              core.warning('Performance degradation detected. Check PR comments for details.');
+            }
+
+  optimize-benchmarks:
+    name: Advanced Performance Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Profile CPU usage
+        run: |
+          mkdir -p profiles
+          go test -run=^$ -bench=BenchmarkThroughputWith1000Subscribers/DirectMatch_DirectGoroutines -cpuprofile=profiles/cpu.prof
+
+      - name: Profile memory allocation
+        run: |
+          go test -run=^$ -bench=BenchmarkThroughputWith1000Subscribers/DirectMatch_DirectGoroutines -memprofile=profiles/mem.prof
+
+      - name: Generate flame graph
+        run: |
+          go install github.com/google/pprof@latest
+          $(go env GOPATH)/bin/pprof -svg -output=profiles/cpu-flame.svg profiles/cpu.prof
+
+      - name: Upload performance profiles
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-profiles
+          path: profiles/
+          retention-days: 14
+
+      - name: Delete previous analysis comments
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all PR comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Find and delete previous analysis comments from this workflow
+            for (const comment of comments.data) {
+              if (comment.body.includes('## 📊 Performance Profile Analysis') && 
+                  comment.user.login === 'github-actions[bot]') {
+                console.log(`Deleting previous analysis comment ID ${comment.id}`);
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                });
+              }
+            }
+
+      - name: Post analysis results
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const body = '## 📊 Performance Profile Analysis\n\n' +
+              'Detailed performance profiles have been generated and are available as artifacts from this workflow run.\n\n' +
+              'To analyze these profiles:\n\n' +
+              '1. Download the performance profiles artifact\n' +
+              '2. Use `go tool pprof` to analyze the profiles:\n' +
+              '```\n' +
+              'go tool pprof profiles/cpu.prof\n' +
+              'go tool pprof profiles/mem.prof\n' +
+              '```\n\n' +
+              'You can visualize the profiles using:\n' +
+              '```\n' +
+              'go tool pprof -http=:8080 profiles/cpu.prof\n' +
+              '```\n\n' +
+              'This will help identify any performance bottlenecks introduced by your changes.';
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

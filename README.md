@@ -74,6 +74,25 @@ bus, err := blazesub.NewBus(config)
 
 See the [User Guide](USER_GUIDE.md) for detailed configuration information.
 
+## 🚀 Releasing New Versions
+
+BlazeSub uses [GoReleaser](https://goreleaser.com/) for streamlined releases. To create a new release:
+
+1. **Update Version**: Update documentation and code with the new version
+2. **Create Tag**:
+   ```bash
+   git tag -a v0.x.y -m "Release v0.x.y"
+   git push origin v0.x.y
+   ```
+3. **Automatic Release**: GitHub Actions will automatically:
+   - Build and validate the release
+   - Generate documentation archive
+   - Create GitHub release with release notes
+   - Sign the release with GPG
+   - Update pkg.go.dev
+
+Maintainers need access to the `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets for signed releases.
+
 ## 📄 License
 
 MIT License

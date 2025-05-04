@@ -9,17 +9,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ThroughputHandler is a minimal message handler that just counts messages received
+// ThroughputHandler is a minimal message handler that just counts messages received.
 type ThroughputHandler struct {
 	count atomic.Int64
 }
 
-func (h *ThroughputHandler) OnMessage(msg *blazesub.Message) error {
+func (h *ThroughputHandler) OnMessage(_ *blazesub.Message) error {
 	h.count.Add(1)
 	return nil
 }
 
-// BenchmarkThroughputWith1000Subscribers measures messages per second with 1000 subscribers
+// BenchmarkThroughputWith1000Subscribers measures messages per second with 1000 subscribers.
 func BenchmarkThroughputWith1000Subscribers(b *testing.B) {
 	tests := []struct {
 		name          string
@@ -71,9 +71,9 @@ func BenchmarkThroughputWith1000Subscribers(b *testing.B) {
 
 			// Create 1000 subscribers
 			const subscriberCount = 1000
-			for i := 0; i < subscriberCount; i++ {
-				subscription, err := bus.Subscribe(subTopic)
-				require.NoError(b, err)
+			for range subscriberCount {
+				subscription, serr := bus.Subscribe(subTopic)
+				require.NoError(b, serr)
 				subscription.OnMessage(handler)
 			}
 
@@ -94,7 +94,7 @@ func BenchmarkThroughputWith1000Subscribers(b *testing.B) {
 			startTime := time.Now()
 
 			// Run the benchmark
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				bus.Publish(pubTopic, payload)
 			}
 
