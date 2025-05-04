@@ -1,6 +1,4 @@
-<h1 align="center"><img src="logo.png" width="96" /></h1>
-
-# 🔥 BlazeSub
+<h1 align="center"><img src="logo.png" width="96" /><br />🔥 BlazeSub</h1>
 
 BlazeSub is a high-performance, lock-free publish/subscribe system designed to outperform traditional MQTT brokers. It provides efficient message routing with support for wildcard subscriptions while maintaining thread safety through lock-free data structures.
 
