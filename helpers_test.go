@@ -35,7 +35,9 @@ func (h *SpyHandler) OnMessage(message *blazesub.Message) error {
 	messagesForTopic, _ := h.messages.LoadOrStore(message.Topic, make([]*blazesub.Message, 0))
 
 	// Create a new slice with the message appended
-	newMessages := append(messagesForTopic, message)
+	newMessages := make([]*blazesub.Message, 0, len(messagesForTopic)+1)
+	newMessages = append(newMessages, messagesForTopic...)
+	newMessages = append(newMessages, message)
 	h.messages.Store(message.Topic, newMessages)
 
 	return nil
