@@ -59,6 +59,31 @@ jobs:
             echo "DEGRADED=false" >> $GITHUB_ENV
           fi
 
+      - name: Delete previous benchmark comments
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all PR comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Find and delete previous benchmark result comments from this workflow
+            for (const comment of comments.data) {
+              if (comment.body.includes('## 🚀 Performance Benchmark Results') && 
+                  comment.user.login === 'github-actions[bot]') {
+                console.log(`Deleting previous benchmark comment ID ${comment.id}`);
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                });
+              }
+            }
+
       - name: Post benchmark results as comment
         uses: actions/github-script@v7
         with:
@@ -126,6 +151,31 @@ jobs:
           name: performance-profiles
           path: profiles/
           retention-days: 14
+
+      - name: Delete previous analysis comments
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all PR comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            // Find and delete previous analysis comments from this workflow
+            for (const comment of comments.data) {
+              if (comment.body.includes('## 📊 Performance Profile Analysis') && 
+                  comment.user.login === 'github-actions[bot]') {
+                console.log(`Deleting previous analysis comment ID ${comment.id}`);
+                await github.rest.issues.deleteComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: comment.id
+                });
+              }
+            }
 
       - name: Post analysis results
         uses: actions/github-script@v7
