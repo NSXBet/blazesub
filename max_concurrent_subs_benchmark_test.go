@@ -24,12 +24,9 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	// Test different subscription loads
 	subscriberCounts := []int{10, 100, 500, 1000, 2000, 5000}
 
-	// Test different MaxConcurrentSubscriptions values
-	maxConcurrentValues := []int{10, 50, 100, 500, 1000, 2000, 5000}
-
 	for _, mode := range poolModes {
 		for _, subCount := range subscriberCounts {
-			for _, maxConcurrent := range maxConcurrentValues {
+			for _, maxConcurrent := range []int{subCount / 2, subCount, subCount * 2} {
 				// Only run tests where maxConcurrent makes sense for the subscriber count
 				// (no point testing maxConcurrent=5000 with only 10 subscribers)
 				if maxConcurrent > subCount*2 {
@@ -92,7 +89,6 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 // Small load benchmark for detailed analysis
 func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 	// More granular values for detailed analysis
-	maxConcurrentValues := []int{1, 5, 10, 25, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 2000}
 	subscriberCount := 1000 // Fixed at 1000 subscribers
 
 	for _, usePool := range []bool{true, false} {
@@ -101,7 +97,7 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 			poolMode = "WorkerPool"
 		}
 
-		for _, maxConcurrent := range maxConcurrentValues {
+		for _, maxConcurrent := range []int{500, 1000, 2000} {
 			benchName := fmt.Sprintf("%s/Subscribers=%d/MaxConcurrent=%d",
 				poolMode, subscriberCount, maxConcurrent)
 
