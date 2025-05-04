@@ -23,12 +23,12 @@ jobs:
         with:
           go-version: stable
 
-      - name: Import GPG key
-        id: import_gpg
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+      # - name: Import GPG key
+      #   id: import_gpg
+      #   uses: crazy-max/ghaction-import-gpg@v6
+      #   with:
+      #     gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+      #     passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
@@ -38,7 +38,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
+          # GPG_FINGERPRINT: ${{ steps.import_gpg.outputs.fingerprint }}
 
       - name: Update Go pkg.go.dev
         run: |
