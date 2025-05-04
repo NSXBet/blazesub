@@ -1,4 +1,4 @@
-<h1 align="center"><img src="logo.png" /></h1>
+<h1 align="center"><img src="logo.png" width="96" /></h1>
 
 # 🔥 BlazeSub
 
