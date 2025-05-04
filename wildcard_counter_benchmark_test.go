@@ -2,7 +2,6 @@ package blazesub_test
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/NSXBet/blazesub"
@@ -20,10 +19,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 		b.Run(fmt.Sprintf("WildcardLookup_%d%%", frequency), func(b *testing.B) {
 			// Setup: Create a subscription trie with a mix of exact and wildcard subscriptions
 			trie := blazesub.NewSubscriptionTrie()
-			handler := &mockHandler{
-				messageReceived: false,
-				mutex:           sync.Mutex{},
-			}
+			handler := newMockHandler(b)
 
 			// Add 1000 exact match subscriptions
 			for i := range 1000 {
@@ -70,10 +66,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 func BenchmarkWildcardCounter(b *testing.B) {
 	// Create a trie with some subscriptions
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Add 1000 exact match subscriptions
 	for i := range 1000 {

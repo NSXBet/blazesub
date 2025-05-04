@@ -185,26 +185,20 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const body = `## 📊 Performance Profile Analysis
-
-            Detailed performance profiles have been generated and are available as artifacts from this workflow run.
-
-            To analyze these profiles:
-
-            1. Download the performance profiles artifact
-            2. Use \`go tool pprof\` to analyze the profiles:
-               ```
-               go tool pprof profiles/cpu.prof
-               go tool pprof profiles/mem.prof
-               ```
-
-            You can visualize the profiles using:
-            ```
-            go tool pprof -http=:8080 profiles/cpu.prof
-            ```
-
-            This will help identify any performance bottlenecks introduced by your changes.
-            `;
+            const body = '## 📊 Performance Profile Analysis\n\n' +
+              'Detailed performance profiles have been generated and are available as artifacts from this workflow run.\n\n' +
+              'To analyze these profiles:\n\n' +
+              '1. Download the performance profiles artifact\n' +
+              '2. Use `go tool pprof` to analyze the profiles:\n' +
+              '```\n' +
+              'go tool pprof profiles/cpu.prof\n' +
+              'go tool pprof profiles/mem.prof\n' +
+              '```\n\n' +
+              'You can visualize the profiles using:\n' +
+              '```\n' +
+              'go tool pprof -http=:8080 profiles/cpu.prof\n' +
+              '```\n\n' +
+              'This will help identify any performance bottlenecks introduced by your changes.';
 
             await github.rest.issues.createComment({
               issue_number: context.issue.number,

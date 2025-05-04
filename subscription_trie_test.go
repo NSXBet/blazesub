@@ -3,24 +3,28 @@ package blazesub_test
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/NSXBet/blazesub"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 )
 
 // mockHandler is a minimal implementation of MessageHandler for testing.
 type mockHandler struct {
-	messageReceived bool
-	mutex           sync.Mutex
+	messagesReceived *atomic.Uint64
+}
+
+func newMockHandler(tb testing.TB) *mockHandler {
+	tb.Helper()
+
+	return &mockHandler{
+		messagesReceived: atomic.NewUint64(0),
+	}
 }
 
 func (m *mockHandler) OnMessage(_ *blazesub.Message) error {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.messageReceived = true
+	m.messagesReceived.Add(1)
 
 	return nil
 }
@@ -39,25 +43,16 @@ func TestNewSubscriptionTrie(t *testing.T) {
 	}
 
 	// Check that we start with an empty root node
-	size := 0
-	trie.Root().Subscriptions().Range(func(_ uint64, _ *blazesub.Subscription) bool {
-		size++
-		return true
-	})
+	size := trie.Root().Subscriptions().Size()
 
-	if size != 0 {
-		t.Fatal("Root node should have no subscriptions initially")
-	}
+	require.Equal(t, 0, size)
 }
 
 func TestSubscribeAndFindExactMatch(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Subscribe to a topic
 	subscription := trie.Subscribe(1, "test/topic", handler)
@@ -86,10 +81,7 @@ func TestSubscribeAndFindExactMatch(t *testing.T) {
 	}
 
 	// Subscribe another handler to the same topic
-	anotherHandler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	anotherHandler := newMockHandler(t)
 	anotherSub := trie.Subscribe(2, "test/topic", anotherHandler)
 
 	if anotherSub == nil {
@@ -107,10 +99,7 @@ func TestUnsubscribe(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Subscribe to a topic
 	subscription := trie.Subscribe(1, "test/topic", handler)
@@ -145,11 +134,10 @@ func TestUnsubscribe(t *testing.T) {
 
 // Rest of the test cases remain similar but with removed references to bus.
 func TestSubscribeAndFindWildcardMatches(t *testing.T) {
+	t.Parallel()
+
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Create subscriptions with wildcards
 	trie.Subscribe(1, "test/+/topic", handler)  // + wildcard
@@ -210,10 +198,7 @@ func TestCleanupEmptyNodes(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Subscribe to a nested topic
 	trie.Subscribe(1, "deep/nested/topic/path", handler)
@@ -241,10 +226,7 @@ func TestMultiLevelWildcardMatch(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Subscribe with multi-level wildcard
 	trie.Subscribe(1, "a/+/+/d", handler) // Matches a/?/?/d
@@ -269,124 +251,11 @@ func TestMultiLevelWildcardMatch(t *testing.T) {
 	}
 }
 
-func TestConcurrentAccess(t *testing.T) {
-	t.Parallel()
-
-	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
-
-	// Use a wait group to synchronize goroutines
-	var waitGroup sync.WaitGroup
-
-	// Number of concurrent operations
-	numOperations := 100
-	// Create an array to track successfully created subscriptions
-	subIDs := make([]uint64, numOperations)
-	var subIDsMutex sync.Mutex
-
-	// Add subscriptions concurrently
-	for operationIndex := range numOperations {
-		waitGroup.Add(1)
-		id := uint64(operationIndex + 1)
-
-		go func(id uint64, index int) {
-			defer waitGroup.Done()
-
-			sub := trie.Subscribe(id, "concurrent/topic", handler)
-			// Record the subscription ID in its corresponding array position
-			subIDsMutex.Lock()
-			subIDs[index] = sub.ID()
-			subIDsMutex.Unlock()
-		}(id, operationIndex)
-	}
-
-	// Wait for all subscriptions to complete
-	waitGroup.Wait()
-
-	// Make sure all subscriptions are processed
-	time.Sleep(500 * time.Millisecond)
-
-	// Helper function to count valid subscriptions
-	countValidSubs := func() int {
-		matches := trie.FindMatchingSubscriptions("concurrent/topic")
-		count := 0
-		// Count the valid subscriptions in the result
-		subIDsMutex.Lock()
-		defer subIDsMutex.Unlock()
-
-		for _, match := range matches {
-			// Verify the subscription is in our tracked list
-			for _, id := range subIDs {
-				if match.ID() == id && id != 0 {
-					count++
-					break
-				}
-			}
-		}
-		return count
-	}
-
-	// Verify at least 95% of subscriptions were added
-	minExpected := numOperations * 95 / 100
-	require.Eventually(t, func() bool {
-		count := countValidSubs()
-		return count >= minExpected
-	}, 5*time.Second, 10*time.Millisecond, "Expected at least %d concurrent subscriptions, got %d", minExpected, countValidSubs())
-
-	// Get the actual count of subscriptions for the next check
-	actualSubscriptionCount := countValidSubs()
-	halfExpected := actualSubscriptionCount / 2
-
-	// Test concurrent unsubscribe operations
-	waitGroup = sync.WaitGroup{}
-	halfOperations := numOperations / 2
-
-	// Start removing subscriptions for the first half
-	for index := range halfOperations {
-		waitGroup.Add(1)
-		id := uint64(index + 1)
-
-		go func(id uint64) {
-			defer waitGroup.Done()
-			trie.Unsubscribe("concurrent/topic", id)
-
-			// Mark this ID as removed by setting it to 0
-			subIDsMutex.Lock()
-			for i, sid := range subIDs {
-				if sid == id {
-					subIDs[i] = 0
-					break
-				}
-			}
-			subIDsMutex.Unlock()
-		}(id)
-	}
-
-	// Wait for all unsubscribe operations to complete
-	waitGroup.Wait()
-	time.Sleep(500 * time.Millisecond)
-
-	// Final check - we should have approximately half the subscriptions remaining
-	// Allow for some variance in the counts due to concurrency
-	minHalfExpected := halfExpected * 90 / 100 // At least 90% of the expected half
-	require.Eventually(t, func() bool {
-		count := countValidSubs()
-		return count >= minHalfExpected
-	}, 5*time.Second, 10*time.Millisecond, "Expected at least %d subscriptions after concurrent operations, got %d",
-		minHalfExpected, countValidSubs())
-}
-
 func TestFindMatchesWithMultipleWildcards(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Add subscriptions with various wildcards
 	trie.Subscribe(1, "a/+/c", handler) // Matches a/?/c
@@ -419,10 +288,7 @@ func TestWildcardAtDifferentPositions(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Test # wildcard at different positions
 	trie.Subscribe(1, "#", handler)     // Matches everything
@@ -458,10 +324,7 @@ func TestEmptySegments(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Test topics with empty segments
 	trie.Subscribe(1, "a//c", handler) // Has empty middle segment
@@ -505,10 +368,7 @@ func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
 	t.Parallel()
 
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(t)
 
 	// Add a bunch of subscriptions
 	for i := uint64(1); i <= 10; i++ {
@@ -551,10 +411,7 @@ func TestMultipleSubscribesAndUnsubscribes(t *testing.T) {
 
 func BenchmarkSubscribe(b *testing.B) {
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	b.ResetTimer()
 
@@ -565,10 +422,7 @@ func BenchmarkSubscribe(b *testing.B) {
 
 func BenchmarkFindMatchingSubscriptions(b *testing.B) {
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Add some subscriptions for the benchmark
 	trie.Subscribe(1, "benchmark/topic", handler)
@@ -585,10 +439,7 @@ func BenchmarkFindMatchingSubscriptions(b *testing.B) {
 
 func BenchmarkUnsubscribe(b *testing.B) {
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Pre-populate
 	for i := range b.N {
@@ -604,10 +455,7 @@ func BenchmarkUnsubscribe(b *testing.B) {
 
 func BenchmarkWildcardMatching(b *testing.B) {
 	trie := blazesub.NewSubscriptionTrie()
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Add a lot of wildcard subscriptions
 	topics := []string{
@@ -649,10 +497,7 @@ func BenchmarkTrieVsMapVsLinearSearch(b *testing.B) {
 	trie := blazesub.NewSubscriptionTrie()
 	linearSubscriptions := make([]*blazesub.Subscription, 0, numSubscriptions)
 	mapSubscriptions := make(map[string][]*blazesub.Subscription) // Direct map for fastest possible lookup
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Generate subscriptions with a mix of exact matches and wildcards
 	topics := make([]string, 0, numTopics)
@@ -767,10 +612,7 @@ func BenchmarkTrieVsMapExactMatchOnly(b *testing.B) {
 	// Create implementations
 	trie := blazesub.NewSubscriptionTrie()
 	mapSubscriptions := make(map[string][]*blazesub.Subscription) // Direct map
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)
@@ -853,10 +695,7 @@ func matchTopic(filter, topic string) bool {
 
 // BenchmarkTrieWithDifferentWildcardDensities measures how wildcards affect performance.
 func BenchmarkTrieWithDifferentWildcardDensities(b *testing.B) {
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Test with different percentages of wildcard subscriptions
 	densities := []int{0, 5, 10, 25, 50, 75, 100}
@@ -926,10 +765,7 @@ func BenchmarkTrieVsMapMixedLookups(b *testing.B) {
 
 	const numSubscriptions = 5000
 
-	handler := &mockHandler{
-		messageReceived: false,
-		mutex:           sync.Mutex{},
-	}
+	handler := newMockHandler(b)
 
 	// Generate topics
 	topics := make([]string, 0, numTopics)

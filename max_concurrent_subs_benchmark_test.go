@@ -2,6 +2,7 @@ package blazesub_test
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 // BenchmarkMaxConcurrentSubscriptions tests the impact of the MaxConcurrentSubscriptions config
 // parameter on performance for different subscriber counts.
+//
+//nolint:gocognit // reason: this is a benchmark test
 func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	// Test with worker pool and direct goroutines
 	poolModes := []struct {
@@ -22,7 +25,11 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	}
 
 	// Test different subscription loads
-	subscriberCounts := []int{10, 100, 500, 1000, 2000, 5000}
+	subscriberCounts := []int{10, 100, 1000}
+
+	if os.Getenv("SLOW_BENCHMARKS") == "true" {
+		subscriberCounts = []int{10, 100, 500, 1000, 2000, 5000}
+	}
 
 	for _, mode := range poolModes {
 		for _, subCount := range subscriberCounts {

@@ -116,17 +116,23 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 			}, time.Second, time.Millisecond*10)
 
 			for _, pair := range testcase.publish {
-				require.Len(
+				require.Eventually(
 					t,
-					messageHandler.MessagesReceived()[pair.topic],
-					len(testcase.want[pair.topic]),
+					func() bool {
+						return len(messageHandler.MessagesReceived()[pair.topic]) == len(testcase.want[pair.topic])
+					},
+					time.Second,
+					time.Millisecond*10,
 				)
 
 				for i, payload := range testcase.want[pair.topic] {
-					require.Equal(
+					require.Eventually(
 						t,
-						payload,
-						messageHandler.MessagesReceived()[pair.topic][i].Data,
+						func() bool {
+							return string(messageHandler.MessagesReceived()[pair.topic][i].Data) == string(payload)
+						},
+						time.Second,
+						time.Millisecond*10,
 					)
 				}
 			}
