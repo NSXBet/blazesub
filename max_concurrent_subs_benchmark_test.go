@@ -12,8 +12,6 @@ import (
 
 // BenchmarkMaxConcurrentSubscriptions tests the impact of the MaxConcurrentSubscriptions config
 // parameter on performance for different subscriber counts.
-//
-//nolint:gocognit // reason: this is a benchmark test
 func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	// Test with worker pool and direct goroutines
 	poolModes := []struct {
@@ -25,7 +23,7 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 	}
 
 	// Test different subscription loads
-	subscriberCounts := []int{10, 100, 1000}
+	subscriberCounts := []int{100, 1000}
 
 	if os.Getenv("SLOW_BENCHMARKS") == "true" {
 		subscriberCounts = []int{10, 100, 500, 1000, 2000, 5000}
@@ -33,13 +31,7 @@ func BenchmarkMaxConcurrentSubscriptions(b *testing.B) {
 
 	for _, mode := range poolModes {
 		for _, subCount := range subscriberCounts {
-			for _, maxConcurrent := range []int{subCount / 2, subCount, subCount * 2} {
-				// Only run tests where maxConcurrent makes sense for the subscriber count
-				// (no point testing maxConcurrent=5000 with only 10 subscribers)
-				if maxConcurrent > subCount*2 {
-					continue
-				}
-
+			for _, maxConcurrent := range []int{subCount / 2, subCount * 2} {
 				benchName := fmt.Sprintf("%s/Subscribers=%d/MaxConcurrent=%d",
 					mode.name, subCount, maxConcurrent)
 
