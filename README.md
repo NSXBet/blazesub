@@ -1,6 +1,9 @@
 <h1 align="center"><img src="logo.png" width="96" /><br />🔥 BlazeSub</h1>
 
 <p align="center">
+  <a href="https://codecov.io/gh/NSXBet/blazesub" >
+    <img src="https://codecov.io/gh/NSXBet/blazesub/graph/badge.svg?token=WVMB77T2ZG"/>
+  </a>
   <a href="https://pkg.go.dev/github.com/NSXBet/blazesub"><img src="https://pkg.go.dev/badge/github.com/NSXBet/blazesub.svg" alt="Go Reference"></a>
   <a href="https://github.com/NSXBet/blazesub/blob/main/LICENSE"><img src="https://img.shields.io/github/license/NSXBet/blazesub" alt="License"></a>
   <a href="https://github.com/NSXBet/blazesub/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/NSXBet/blazesub" alt="Go Version"></a>
