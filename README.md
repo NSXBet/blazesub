@@ -1,5 +1,11 @@
 <h1 align="center"><img src="logo.png" width="96" /><br />🔥 BlazeSub</h1>
 
+<p align="center">
+  <a href="https://pkg.go.dev/github.com/NSXBet/blazesub"><img src="https://pkg.go.dev/badge/github.com/NSXBet/blazesub.svg" alt="Go Reference"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/NSXBet/blazesub" alt="License"></a>
+  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/NSXBet/blazesub" alt="Go Version"></a>
+</p>
+
 BlazeSub is a high-performance, lock-free publish/subscribe system designed to outperform traditional MQTT brokers. It provides efficient message routing with support for wildcard subscriptions while maintaining thread safety through lock-free data structures.
 
 ## ✨ Features
@@ -22,6 +28,7 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 
 ## 📘 Documentation
 
+- [**API Reference**](https://pkg.go.dev/github.com/NSXBet/blazesub) - Complete API documentation on pkg.go.dev
 - [**User Guide**](USER_GUIDE.md) - Comprehensive guide for using BlazeSub
 - [**Performance Analysis**](PERFORMANCE.md) - Detailed performance metrics and comparisons
 - [**MaxConcurrentSubscriptions Guide**](max_concurrent_subscriptions.md) - Optimizing message delivery to multiple subscribers
@@ -64,6 +71,8 @@ config := blazesub.Config{
 }
 bus, err := blazesub.NewBus(config)
 ```
+
+For more examples demonstrating different configurations and usage patterns, see the [Examples section on pkg.go.dev](https://pkg.go.dev/github.com/NSXBet/blazesub#pkg-examples).
 
 ## 🔧 Key Configuration Options
 
