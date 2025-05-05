@@ -15,7 +15,7 @@ type NoOpAtomicHandler struct {
 	count atomic.Int64
 }
 
-func (h *NoOpAtomicHandler) OnMessage(*blazesub.Message) error {
+func (h *NoOpAtomicHandler) OnMessage(*blazesub.ByteMessage) error {
 	h.count.Add(1)
 	return nil
 }
@@ -154,6 +154,7 @@ func BenchmarkConcurrentPoolVsGoroutines(b *testing.B) {
 				for pb.Next() {
 					topicIndex := counter % len(topics)
 					bus.Publish(topics[topicIndex], payload)
+
 					counter++
 				}
 			})
@@ -194,13 +195,9 @@ func BenchmarkLatencyPoolVsGoroutines(b *testing.B) {
 			done := make(chan struct{}, 1)
 
 			// Create a specialized handler that signals when a message is received
-			latencyMeasureHandler := blazesub.MessageHandlerFunc(func(*blazesub.Message) error {
-				select {
-				case done <- struct{}{}:
-				default:
-				}
-				return nil
-			})
+			latencyMeasureHandler := &LatencyMeasureHandler[[]byte]{
+				done: done,
+			}
 
 			// Subscribe to a topic
 			subscription, err := bus.Subscribe("test/latency")

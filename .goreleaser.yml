@@ -12,13 +12,9 @@ archives:
       - README.md
       - LICENSE
       - USER_GUIDE.md
+      - USER_GUIDE_MAX_CONCURRENT_SUBS.md
       - PERFORMANCE.md
       - BENCHMARK.md
-      - benchmark_comparison.md
-      - benchmark_analysis.md
-      - hybrid_trie_optimization.md
-      - subscription_trie_cleanup.md
-      - max_concurrent_subscriptions.md
 
 # Checksum configuration
 checksum:

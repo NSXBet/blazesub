@@ -191,7 +191,7 @@ func TestTrieUnsubscribeTable(t *testing.T) {
 		t.Run(testcase.name, func(t *testing.T) {
 			t.Parallel()
 
-			trie := blazesub.NewSubscriptionTrie()
+			trie := blazesub.NewSubscriptionTrie[[]byte]()
 
 			// Add subscriptions
 			for _, sub := range testcase.subscriptions {
@@ -237,7 +237,7 @@ func TestUnsubscribeMaintainsMemory(t *testing.T) {
 
 	handler := newMockHandler(t)
 
-	trie := blazesub.NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie[[]byte]()
 
 	// Add a lot of subscriptions with a common prefix
 	commonPrefix := "test/shared/prefix"
@@ -281,7 +281,7 @@ func TestResubscribePerformance(t *testing.T) {
 	t.Parallel()
 
 	handler := newMockHandler(t)
-	trie := blazesub.NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie[[]byte]()
 
 	// First, let's add 100 subscriptions
 	for i := uint64(1); i <= 100; i++ {

@@ -97,7 +97,7 @@ func TestCanPublishAndSubscribe(t *testing.T) {
 			bus, err := blazesub.NewBusWithDefaults()
 			require.NoError(t, err)
 
-			messageHandler := SpyMessageHandler(t)
+			messageHandler := SpyMessageHandler[[]byte](t)
 
 			for _, topic := range testcase.subscribe {
 				subscription, serr := bus.Subscribe(topic)
@@ -146,7 +146,7 @@ func TestSlowMessageHandler(t *testing.T) {
 	bus, err := blazesub.NewBusWithDefaults()
 	require.NoError(t, err)
 
-	slowHandler := SpyMessageHandler(t)
+	slowHandler := SpyMessageHandler[[]byte](t)
 	slowHandler.SetDelay(50 * time.Millisecond)
 
 	subscription, err := bus.Subscribe("test")
@@ -154,7 +154,7 @@ func TestSlowMessageHandler(t *testing.T) {
 	require.NotNil(t, subscription)
 	subscription.OnMessage(slowHandler)
 
-	fastHandler := SpyMessageHandler(t)
+	fastHandler := SpyMessageHandler[[]byte](t)
 
 	subscription2, err := bus.Subscribe("test")
 	require.NoError(t, err)
@@ -288,7 +288,7 @@ func TestBusUnsubscribe(t *testing.T) {
 	require.NotNil(t, subscription)
 
 	// Add a handler to ensure it can receive messages
-	handler := SpyMessageHandler(t)
+	handler := SpyMessageHandler[[]byte](t)
 	subscription.OnMessage(handler)
 
 	// Publish a message to confirm it works
@@ -321,9 +321,9 @@ func TestBusMultipleUnsubscribe(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create several subscriptions
-	handler := SpyMessageHandler(t)
+	handler := SpyMessageHandler[[]byte](t)
 
-	subscriptions := make([]*blazesub.Subscription, 5)
+	subscriptions := make([]*blazesub.Subscription[[]byte], 5)
 
 	for index := range 5 {
 		topic := fmt.Sprintf("test/topic/%d", index)
@@ -394,8 +394,8 @@ func TestBusWildcardUnsubscribe(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create wildcard subscriptions
-	handler1 := SpyMessageHandler(t)
-	handler2 := SpyMessageHandler(t)
+	handler1 := SpyMessageHandler[[]byte](t)
+	handler2 := SpyMessageHandler[[]byte](t)
 
 	// Single-level wildcard
 	subscription1, err := bus.Subscribe("test/+/topic")
@@ -474,12 +474,12 @@ func TestBusUnsubscribePerformance(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a simple message handler
-	handler := SpyMessageHandler(t)
+	handler := SpyMessageHandler[[]byte](t)
 
 	// Measure time to create 1000 subscriptions
 	startSubscribe := time.Now()
 
-	subscriptions := make([]*blazesub.Subscription, 1000)
+	subscriptions := make([]*blazesub.Subscription[[]byte], 1000)
 
 	for index := range 1000 {
 		topic := fmt.Sprintf("test/topic/%d", index%100) // 100 unique topics
