@@ -78,9 +78,51 @@ func (st *SubscriptionTrie[T]) ExactMatchCount() int {
 	return int(st.exactMatchCount.Load())
 }
 
-// splitTopic returns cached segments if available, otherwise splits and caches.
+// splitTopic returns segments of a topic split by the '/' character.
+// This implementation is optimized to reduce allocations.
 func (st *SubscriptionTrie[T]) splitTopic(topic string) []string {
-	segments := strings.Split(topic, "/")
+	// Special case for empty topics
+	if topic == "" {
+		return []string{}
+	}
+
+	// Fast path for simple topics with no separator
+	if !strings.Contains(topic, "/") {
+		return []string{topic}
+	}
+
+	// Count separators to pre-allocate exact slice size
+	separatorCount := 0
+	for i := 0; i < len(topic); i++ {
+		if topic[i] == '/' {
+			separatorCount++
+		}
+	}
+
+	// Create a slice with exact capacity needed
+	segments := make([]string, 0, separatorCount+1)
+
+	// Manual splitting to avoid additional allocations
+	start := 0
+	for i := 0; i < len(topic); i++ {
+		if topic[i] == '/' {
+			// Add segment to result
+			if i > start {
+				segments = append(segments, topic[start:i])
+			} else {
+				segments = append(segments, "")
+			}
+			start = i + 1
+		}
+	}
+
+	// Add the final segment
+	if start < len(topic) {
+		segments = append(segments, topic[start:])
+	} else if start == len(topic) {
+		// Handle trailing slash
+		segments = append(segments, "")
+	}
 
 	return segments
 }
@@ -269,122 +311,119 @@ func cleanupEmptyNodesOptimized[T any](nodePath []*TrieNode[T], segments []strin
 
 // findMatches recursively finds all matching subscriptions for a topic.
 func findMatches[T any](node *TrieNode[T], segments []string, index int, result map[uint64]*Subscription[T]) {
-	// If we've reached a "#" node, it matches everything at this level and below
+	// Fast check for wildcard "#" - this matches everything at this level and below
 	if wildcard, exists := node.children.Load("#"); exists {
-		// Safely iterate through the concurrent map
+		// Add all wildcard subscriptions
 		wildcard.subscriptions.Range(func(id uint64, sub *Subscription[T]) bool {
 			result[id] = sub
 			return true
 		})
 	}
 
-	// If we've processed all segments, add subscriptions at current node
+	// If we've processed all segments, collect subscriptions at current node
 	if index >= len(segments) {
-		// Safely iterate through the concurrent map
+		// No need to continue if we're past the segments or the node has no subscriptions
+		if node.subscriptions.Size() == 0 {
+			return
+		}
+
+		// Add all subscriptions from the current node
 		node.subscriptions.Range(func(id uint64, sub *Subscription[T]) bool {
 			result[id] = sub
 			return true
 		})
-
 		return
 	}
 
 	segment := segments[index]
+	nextIndex := index + 1 // Pre-compute the next index
 
-	// Check for exact match
+	// Most common case: exact match for the segment
 	if child, exists := node.children.Load(segment); exists {
-		findMatches(child, segments, index+1, result)
+		findMatches(child, segments, nextIndex, result)
 	}
 
-	// Check for "+" wildcard match (matches any single segment)
+	// Handle "+" wildcard (matches exactly one segment)
 	if plus, exists := node.children.Load("+"); exists {
-		findMatches(plus, segments, index+1, result)
+		findMatches(plus, segments, nextIndex, result)
 	}
 }
 
 // FindMatchingSubscriptions returns all subscriptions that match a given topic.
 func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscription[T] {
-	// Special case for empty topic
+	// Fast path for empty topic
 	if topic == "" {
 		return nil
 	}
 
-	// Try to get from cache first
+	// Try cache first - most topics are frequently reused
 	if cachedResult, ok := st.resultCache.Load(topic); ok {
 		return cachedResult
 	}
 
-	// Fast path: If there are no wildcard subscriptions, we can use exactMatches directly
-	wildcardCount := st.wildcardCount.Load()
-	if wildcardCount == 0 {
-		// No wildcards in the system, just return exact matches (or nil)
+	// Optimization: If no wildcards exist in the system, we only need exact matches
+	if st.wildcardCount.Load() == 0 {
+		// Fast exact match lookup
 		topicSubs, found := st.exactMatches.Load(topic)
 		if !found {
 			return nil
 		}
 
-		// Fast path: If there's only a single subscriber (common case), optimize
-		if topicSubs.Size() == 1 {
+		// Optimize for the common case of a single subscriber
+		size := topicSubs.Size()
+		if size == 1 {
 			var singleSub *Subscription[T]
-
 			topicSubs.Range(func(_ uint64, sub *Subscription[T]) bool {
 				singleSub = sub
-				return false // stop at first
+				return false // stop after first one
 			})
 
-			// Create a single-element slice without resizing
+			// Return a pre-allocated single-element slice
 			result := []*Subscription[T]{singleSub}
-			// Cache the result before returning
-			st.resultCache.Store(topic, result)
 
+			// Cache for future lookups
+			st.resultCache.Store(topic, result)
 			return result
 		}
 
-		// We know approximately how many subscriptions to expect
-		size := topicSubs.Size()
+		// Pre-allocate exact size for multiple subscribers
 		result := make([]*Subscription[T], 0, size)
-
 		topicSubs.Range(func(_ uint64, sub *Subscription[T]) bool {
 			result = append(result, sub)
 			return true
 		})
 
-		// Cache the result before returning
+		// Cache result for future lookups
 		st.resultCache.Store(topic, result)
-
 		return result
 	}
 
-	// If we have exact matches and wildcards, start with exactMatches
-	resultMap := make(map[uint64]*Subscription[T])
+	// We have wildcards, so need to combine exact and wildcard matches
+	// Estimate an initial capacity for the result map based on wildcard count
+	resultMap := make(map[uint64]*Subscription[T], 8) // Most topics have few matches
 
-	topicSubs, found := st.exactMatches.Load(topic)
-	if found {
-		// Fill the map with exact matches
+	// First add any exact matches
+	if topicSubs, found := st.exactMatches.Load(topic); found {
 		topicSubs.Range(func(id uint64, sub *Subscription[T]) bool {
 			resultMap[id] = sub
 			return true
 		})
 	}
 
-	// Now search for wildcard matches only if we have wildcards
-	// Get the segments only when needed
+	// Then find wildcard matches
 	segments := st.splitTopic(topic)
-
-	// Pre-allocate a result slice to avoid resizing
-	estimatedSize := min(int(wildcardCount)+len(resultMap), int(st.maxResultCacheSize))
-
-	// Search the trie for wildcard matches
 	findMatches(st.root, segments, 0, resultMap)
 
-	// Convert result map to slice with pre-allocated capacity
-	result := make([]*Subscription[T], 0, estimatedSize)
+	// Create result slice with exact capacity
+	result := make([]*Subscription[T], 0, len(resultMap))
 	for _, sub := range resultMap {
 		result = append(result, sub)
 	}
 
-	// Cache the result
-	st.resultCache.Store(topic, result)
+	// Cache result for future lookups (if not too many cached topics already)
+	if st.resultCache.Size() < int(st.maxResultCacheSize) {
+		st.resultCache.Store(topic, result)
+	}
 
 	return result
 }

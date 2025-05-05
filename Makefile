@@ -20,7 +20,7 @@ bench:
 lint:
 	@golangci-lint run --issues-exit-code=1 --fix
 
-.PHONY: multiple-race
+.PHONY: race-many
 race-many: gotestsum
 	@gotestsum --format github-actions --format-icons=hivis -- --race --count=20 ./...
 
