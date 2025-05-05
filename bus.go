@@ -13,6 +13,17 @@ import (
 	"go.uber.org/zap"
 )
 
+type EventBus interface {
+	WaitReady(timeout time.Duration) error
+	Publish(topic string, payload []byte)
+	Subscribe(topic string) (*Subscription, error)
+	Close() error
+
+	// Stats
+	SubscriptionsCount() uint64
+	InflightMessagesCount() uint64
+}
+
 const (
 	MinimumWorkerCount  = 20000
 	DefaultMaxCacheSize = 2000
@@ -37,7 +48,12 @@ type Bus struct {
 
 	maxConcurrentSubscriptions int
 	useGoroutinePool           bool // Whether using worker pool or direct goroutines
+
+	currentSubscriptionsCount *atomic.Uint64
+	inflightMessagesCount     *atomic.Uint64
 }
+
+var _ EventBus = (*Bus)(nil)
 
 func NewBus(config Config) (*Bus, error) {
 	if config.Logger.IsZero() {
@@ -60,6 +76,8 @@ func NewBus(config Config) (*Bus, error) {
 		maxCacheSize:               DefaultMaxCacheSize,
 		maxConcurrentSubscriptions: maxConcurrentSubscriptions,
 		useGoroutinePool:           config.UseGoroutinePool,
+		currentSubscriptionsCount:  atomic.NewUint64(0),
+		inflightMessagesCount:      atomic.NewUint64(0),
 	}
 
 	// Only initialize worker pool if needed
@@ -159,6 +177,8 @@ func (b *Bus) Publish(topic string, payload []byte) {
 		return
 	}
 
+	b.inflightMessagesCount.Add(uint64(subscriberCount))
+
 	// Fast path for single subscriber (very common case)
 	if subscriberCount == 1 {
 		subscription := matchingSubs[0]
@@ -166,11 +186,15 @@ func (b *Bus) Publish(topic string, payload []byte) {
 		if b.useGoroutinePool {
 			// Use worker pool
 			_ = b.pubpool.Submit(func() {
+				defer b.inflightMessagesCount.Sub(1)
+
 				_ = subscription.receiveMessage(msg)
 			})
 		} else {
 			// Use direct goroutine
 			go func() {
+				defer b.inflightMessagesCount.Sub(1)
+
 				_ = subscription.receiveMessage(msg)
 			}()
 		}
@@ -185,11 +209,15 @@ func (b *Bus) Publish(topic string, payload []byte) {
 			if b.useGoroutinePool {
 				// Use worker pool
 				_ = b.pubpool.Submit(func() {
+					defer b.inflightMessagesCount.Sub(1)
+
 					_ = sub.receiveMessage(msg)
 				})
 			} else {
 				// Use direct goroutine
 				go func(s *Subscription) {
+					defer b.inflightMessagesCount.Sub(1)
+
 					_ = s.receiveMessage(msg)
 				}(sub)
 			}
@@ -204,6 +232,8 @@ func (b *Bus) Publish(topic string, payload []byte) {
 			// Process all subscriptions in a single task
 			for _, subscription := range matchingSubs {
 				_ = subscription.receiveMessage(msg)
+
+				b.inflightMessagesCount.Sub(1)
 			}
 		})
 	} else {
@@ -212,6 +242,8 @@ func (b *Bus) Publish(topic string, payload []byte) {
 			// Process all subscriptions in a single goroutine
 			for _, subscription := range matchingSubs {
 				_ = subscription.receiveMessage(msg)
+
+				b.inflightMessagesCount.Sub(1)
 			}
 		}()
 	}
@@ -219,6 +251,7 @@ func (b *Bus) Publish(topic string, payload []byte) {
 
 // removeSubscription removes a subscription from the trie.
 func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
+	b.currentSubscriptionsCount.Sub(1)
 	b.subscriptions.Unsubscribe(topic, subscriptionID)
 
 	// If this is a wildcard subscription, we need to clear the entire topic cache
@@ -245,9 +278,53 @@ func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	// Set up unsubscribe function
 	unsubscribeFn := func() error {
 		b.removeSubscription(topic, subID)
+
 		return nil
 	}
 	subscription.SetUnsubscribeFunc(unsubscribeFn)
 
+	b.currentSubscriptionsCount.Add(1)
+
 	return subscription, nil
+}
+
+func (b *Bus) SubscriptionsCount() uint64 {
+	return b.currentSubscriptionsCount.Load()
+}
+
+func (b *Bus) InflightMessagesCount() uint64 {
+	return b.inflightMessagesCount.Load()
+}
+
+// WaitReady waits for the Bus to be ready to handle messages.
+//
+// This method is useful during application startup to ensure the bus is ready before
+// publishing messages. For direct goroutine mode (UseGoroutinePool = false), the bus
+// is always ready and this method returns immediately. For worker pool mode, this method
+// waits until the worker pool is properly initialized.
+//
+// The timeout parameter specifies how long to wait for the bus to become ready.
+// Returns nil when the bus is ready, or ErrTimeoutWaitReady if the timeout expires.
+func (b *Bus) WaitReady(timeout time.Duration) error {
+	// If direct goroutines mode is used, the bus is always ready
+	if !b.useGoroutinePool {
+		return nil
+	}
+
+	// When using goroutine pool, wait for the pool to be ready
+	if b.pubpool == nil {
+		return ErrTimeoutWaitReady
+	}
+
+	// Wait for the pool to be ready within the specified timeout
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// Check if the worker pool is ready
+		if !b.pubpool.IsClosed() {
+			return nil
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return ErrTimeoutWaitReady
 }
