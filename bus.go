@@ -13,10 +13,10 @@ import (
 	"go.uber.org/zap"
 )
 
-type EventBus interface {
+type EventBus[T any] interface {
 	WaitReady(timeout time.Duration) error
-	Publish(topic string, payload []byte)
-	Subscribe(topic string) (*Subscription, error)
+	Publish(topic string, payload T, metadata ...map[string]any)
+	Subscribe(topic string) (*Subscription[T], error)
 	Close() error
 
 	// Stats
@@ -32,18 +32,14 @@ const (
 	closeInterval = time.Millisecond * 10
 )
 
-type MessageHandler interface {
-	OnMessage(message *Message) error
-}
-
-type Bus struct {
+type Bus[T any] struct {
 	subID         *atomic.Uint64
-	subscriptions *SubscriptionTrie
+	subscriptions *SubscriptionTrie[T]
 	pubpool       *ants.Pool // Will be nil if UseGoroutinePool is false
 	logger        logr.Logger
 
 	// Cache recently used topics for faster lookup
-	topicCache   *xsync.Map[string, []*Subscription]
+	topicCache   *xsync.Map[string, []*Subscription[T]]
 	maxCacheSize int
 
 	maxConcurrentSubscriptions int
@@ -53,9 +49,9 @@ type Bus struct {
 	inflightMessagesCount     *atomic.Uint64
 }
 
-var _ EventBus = (*Bus)(nil)
+var _ EventBus[any] = (*Bus[any])(nil)
 
-func NewBus(config Config) (*Bus, error) {
+func NewBusOf[T any](config Config) (*Bus[T], error) {
 	if config.Logger.IsZero() {
 		logger, err := zap.NewProduction()
 		if err != nil {
@@ -68,11 +64,11 @@ func NewBus(config Config) (*Bus, error) {
 	maxConcurrentSubscriptions := max(config.MaxConcurrentSubscriptions, DefaultMaxConcurrentSubscriptions)
 
 	// Create a new bus instance
-	bus := &Bus{
+	bus := &Bus[T]{
 		subID:                      atomic.NewUint64(0),
-		subscriptions:              NewSubscriptionTrie(),
+		subscriptions:              NewSubscriptionTrie[T](),
 		logger:                     config.Logger,
-		topicCache:                 xsync.NewMap[string, []*Subscription](),
+		topicCache:                 xsync.NewMap[string, []*Subscription[T]](),
 		maxCacheSize:               DefaultMaxCacheSize,
 		maxConcurrentSubscriptions: maxConcurrentSubscriptions,
 		useGoroutinePool:           config.UseGoroutinePool,
@@ -118,11 +114,21 @@ func NewBus(config Config) (*Bus, error) {
 	return bus, nil
 }
 
-func NewBusWithDefaults() (*Bus, error) {
-	return NewBus(NewConfig())
+func NewBusWithDefaultsOf[T any]() (*Bus[T], error) {
+	return NewBusOf[T](NewConfig())
 }
 
-func (b *Bus) Close() error {
+type ByteBus = Bus[[]byte]
+
+func NewBus(config Config) (*ByteBus, error) {
+	return NewBusOf[[]byte](config)
+}
+
+func NewBusWithDefaults() (*ByteBus, error) {
+	return NewBusWithDefaultsOf[[]byte]()
+}
+
+func (b *Bus[T]) Close() error {
 	// Only release pool if it exists
 	if b.pubpool != nil {
 		defer b.pubpool.Release()
@@ -143,21 +149,28 @@ func (b *Bus) Close() error {
 // Publish publishes a message to subscribers of the specified topic.
 //
 //nolint:gocognit // reason: code is optimized for performance.
-func (b *Bus) Publish(topic string, payload []byte) {
+func (b *Bus[T]) Publish(topic string, payload T, metadata ...map[string]any) {
 	// Fast path for common empty topic case
 	if topic == "" {
 		return
 	}
 
+	var metadataMap map[string]any
+
+	if len(metadata) > 0 {
+		metadataMap = metadata[0]
+	}
+
 	// Create the message only once
-	msg := &Message{
+	msg := &Message[T]{
 		Topic:        topic,
 		Data:         payload,
 		UTCTimestamp: time.Now().UTC(),
+		Metadata:     metadataMap,
 	}
 
 	// Try to get subscribers from cache first for common topics
-	var matchingSubs []*Subscription
+	var matchingSubs []*Subscription[T]
 
 	if cachedSubs, exists := b.topicCache.Load(topic); exists {
 		matchingSubs = cachedSubs
@@ -198,6 +211,7 @@ func (b *Bus) Publish(topic string, payload []byte) {
 				_ = subscription.receiveMessage(msg)
 			}()
 		}
+
 		return
 	}
 
@@ -215,13 +229,14 @@ func (b *Bus) Publish(topic string, payload []byte) {
 				})
 			} else {
 				// Use direct goroutine
-				go func(s *Subscription) {
+				go func(s *Subscription[T]) {
 					defer b.inflightMessagesCount.Sub(1)
 
 					_ = s.receiveMessage(msg)
 				}(sub)
 			}
 		}
+
 		return
 	}
 
@@ -250,7 +265,7 @@ func (b *Bus) Publish(topic string, payload []byte) {
 }
 
 // removeSubscription removes a subscription from the trie.
-func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
+func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) {
 	b.currentSubscriptionsCount.Sub(1)
 	b.subscriptions.Unsubscribe(topic, subscriptionID)
 
@@ -258,7 +273,7 @@ func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
 	// as it could affect any number of topics
 	if strings.ContainsAny(topic, "+#") {
 		// For wildcard topics, clear the entire cache as it might affect many topics
-		b.topicCache = xsync.NewMap[string, []*Subscription]()
+		b.topicCache.Clear()
 	} else {
 		// For exact topic matches, just remove that topic from the cache
 		b.topicCache.Delete(topic)
@@ -266,7 +281,7 @@ func (b *Bus) removeSubscription(topic string, subscriptionID uint64) {
 }
 
 // Subscribe creates a new subscription for the specified topic.
-func (b *Bus) Subscribe(topic string) (*Subscription, error) {
+func (b *Bus[T]) Subscribe(topic string) (*Subscription[T], error) {
 	subID := b.subID.Add(1)
 
 	// Use the trie's Subscribe method to create and register the subscription
@@ -288,13 +303,15 @@ func (b *Bus) Subscribe(topic string) (*Subscription, error) {
 	return subscription, nil
 }
 
-func (b *Bus) SubscriptionsCount() uint64 {
+func (b *Bus[T]) SubscriptionsCount() uint64 {
 	return b.currentSubscriptionsCount.Load()
 }
 
-func (b *Bus) InflightMessagesCount() uint64 {
+func (b *Bus[T]) InflightMessagesCount() uint64 {
 	return b.inflightMessagesCount.Load()
 }
+
+const waitReadyInterval = time.Millisecond * 10
 
 // WaitReady waits for the Bus to be ready to handle messages.
 //
@@ -305,7 +322,7 @@ func (b *Bus) InflightMessagesCount() uint64 {
 //
 // The timeout parameter specifies how long to wait for the bus to become ready.
 // Returns nil when the bus is ready, or ErrTimeoutWaitReady if the timeout expires.
-func (b *Bus) WaitReady(timeout time.Duration) error {
+func (b *Bus[T]) WaitReady(timeout time.Duration) error {
 	// If direct goroutines mode is used, the bus is always ready
 	if !b.useGoroutinePool {
 		return nil
@@ -323,7 +340,8 @@ func (b *Bus) WaitReady(timeout time.Duration) error {
 		if !b.pubpool.IsClosed() {
 			return nil
 		}
-		time.Sleep(10 * time.Millisecond)
+
+		time.Sleep(waitReadyInterval)
 	}
 
 	return ErrTimeoutWaitReady

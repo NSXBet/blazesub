@@ -1,12 +1,12 @@
 package blazesub_test
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/NSXBet/blazesub"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 )
 
 func TestWaitReady(t *testing.T) {
@@ -128,18 +128,19 @@ func TestWaitReadyWithActivity(t *testing.T) {
 	require.NoError(t, err)
 
 	// Use a simple counter to verify message delivery
-	var counter atomic.Int64
+	counter := atomic.NewInt64(0)
+
 	subscription, err := bus.Subscribe("test/topic")
 	require.NoError(t, err)
 
-	subscription.OnMessage(blazesub.MessageHandlerFunc(func(msg *blazesub.Message) error {
-		counter.Add(1)
-		return nil
-	}))
+	subscription.OnMessage(&SharedCounterHandler{
+		MessageCount: counter,
+	})
 
 	// Publish a small number of messages
 	const messageCount = 10
-	for i := 0; i < messageCount; i++ {
+
+	for range messageCount {
 		bus.Publish("test/topic", []byte("test-data"))
 	}
 
@@ -152,5 +153,5 @@ func TestWaitReadyWithActivity(t *testing.T) {
 
 	// Check that at least some messages were processed
 	count := counter.Load()
-	require.Greater(t, count, int64(0), "should have processed some messages")
+	require.Positive(t, count, "should have processed some messages")
 }

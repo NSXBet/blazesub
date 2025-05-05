@@ -14,43 +14,43 @@ const (
 )
 
 // TrieNode represents a node in the subscription trie.
-type TrieNode struct {
+type TrieNode[T any] struct {
 	segment       string
-	children      *xsync.Map[string, *TrieNode]
-	subscriptions *xsync.Map[uint64, *Subscription] // Use thread-safe map for subscriptions
+	children      *xsync.Map[string, *TrieNode[T]]
+	subscriptions *xsync.Map[uint64, *Subscription[T]] // Use thread-safe map for subscriptions
 }
 
-func (t *TrieNode) Children() map[string]*TrieNode {
+func (t *TrieNode[T]) Children() map[string]*TrieNode[T] {
 	return xsync.ToPlainMap(t.children)
 }
 
-func (t *TrieNode) Subscriptions() *xsync.Map[uint64, *Subscription] {
+func (t *TrieNode[T]) Subscriptions() *xsync.Map[uint64, *Subscription[T]] {
 	return t.subscriptions
 }
 
 // SubscriptionTrie is a trie-based structure for efficient topic subscriptions.
-type SubscriptionTrie struct {
-	root            *TrieNode
-	exactMatches    *xsync.Map[string, *xsync.Map[uint64, *Subscription]] // Fast map for exact match topics
-	wildcardCount   *atomic.Uint32                                        // Counter for wildcard subscriptions
+type SubscriptionTrie[T any] struct {
+	root            *TrieNode[T]
+	exactMatches    *xsync.Map[string, *xsync.Map[uint64, *Subscription[T]]] // Fast map for exact match topics
+	wildcardCount   *atomic.Uint32                                           // Counter for wildcard subscriptions
 	exactMatchCount *atomic.Uint32
 	totalCount      *atomic.Uint32
 
 	// Caching for frequently used operations
-	resultCache        *xsync.Map[string, []*Subscription] // Cache for frequently accessed topic matches
-	maxResultCacheSize int32                               // Maximum size of the result cache
+	resultCache        *xsync.Map[string, []*Subscription[T]] // Cache for frequently accessed topic matches
+	maxResultCacheSize int32                                  // Maximum size of the result cache
 }
 
 // NewSubscriptionTrie creates a new subscription trie.
-func NewSubscriptionTrie() *SubscriptionTrie {
-	st := &SubscriptionTrie{
-		root: &TrieNode{
+func NewSubscriptionTrie[T any]() *SubscriptionTrie[T] {
+	st := &SubscriptionTrie[T]{
+		root: &TrieNode[T]{
 			segment:       "",
-			children:      xsync.NewMap[string, *TrieNode](),
-			subscriptions: xsync.NewMap[uint64, *Subscription](),
+			children:      xsync.NewMap[string, *TrieNode[T]](),
+			subscriptions: xsync.NewMap[uint64, *Subscription[T]](),
 		},
-		exactMatches:       xsync.NewMap[string, *xsync.Map[uint64, *Subscription]](),
-		resultCache:        xsync.NewMap[string, []*Subscription](),
+		exactMatches:       xsync.NewMap[string, *xsync.Map[uint64, *Subscription[T]]](),
+		resultCache:        xsync.NewMap[string, []*Subscription[T]](),
 		maxResultCacheSize: DefaultMaxResultCacheSize,
 
 		wildcardCount:   atomic.NewUint32(0),
@@ -66,29 +66,29 @@ func hasWildcard(pattern string) bool {
 	return strings.ContainsAny(pattern, "+#")
 }
 
-func (st *SubscriptionTrie) SubscriptionCount() int {
+func (st *SubscriptionTrie[T]) SubscriptionCount() int {
 	return int(st.totalCount.Load())
 }
 
-func (st *SubscriptionTrie) WildcardCount() int {
+func (st *SubscriptionTrie[T]) WildcardCount() int {
 	return int(st.wildcardCount.Load())
 }
 
-func (st *SubscriptionTrie) ExactMatchCount() int {
+func (st *SubscriptionTrie[T]) ExactMatchCount() int {
 	return int(st.exactMatchCount.Load())
 }
 
 // splitTopic returns cached segments if available, otherwise splits and caches.
-func (st *SubscriptionTrie) splitTopic(topic string) []string {
+func (st *SubscriptionTrie[T]) splitTopic(topic string) []string {
 	segments := strings.Split(topic, "/")
 
 	return segments
 }
 
 // Subscribe adds a subscription for a topic pattern.
-func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler MessageHandler) *Subscription {
+func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler MessageHandler[T]) *Subscription[T] {
 	// Create a new subscription
-	subscription := &Subscription{
+	subscription := &Subscription[T]{
 		id:            subID,
 		topic:         topic,
 		handler:       handler,
@@ -98,6 +98,7 @@ func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler Messag
 	// Set the unsubscribe function that references this trie
 	unsubscribeFn := func() error {
 		st.Unsubscribe(topic, subID)
+
 		return nil
 	}
 	subscription.SetUnsubscribeFunc(unsubscribeFn)
@@ -122,15 +123,15 @@ func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler Messag
 	// Add to the trie
 	currentNode := st.root
 
-	var subscriptions *xsync.Map[uint64, *Subscription]
+	var subscriptions *xsync.Map[uint64, *Subscription[T]]
 
 	for _, segment := range segments {
 		trieNode, _ := currentNode.children.LoadOrStore(
 			segment,
-			&TrieNode{
+			&TrieNode[T]{
 				segment:       segment,
-				children:      xsync.NewMap[string, *TrieNode](),
-				subscriptions: xsync.NewMap[uint64, *Subscription](),
+				children:      xsync.NewMap[string, *TrieNode[T]](),
+				subscriptions: xsync.NewMap[uint64, *Subscription[T]](),
 			},
 		)
 
@@ -149,7 +150,7 @@ func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler Messag
 
 	// If it's an exact match, also add to the exactMatches map
 	if !isWildcard {
-		topicSubs, _ := st.exactMatches.LoadOrStore(topic, xsync.NewMap[uint64, *Subscription]())
+		topicSubs, _ := st.exactMatches.LoadOrStore(topic, xsync.NewMap[uint64, *Subscription[T]]())
 
 		topicSubs.Store(subID, subscription)
 	}
@@ -158,14 +159,14 @@ func (st *SubscriptionTrie) Subscribe(subID uint64, topic string, handler Messag
 	// This is important for wildcard subscriptions
 	if isWildcard {
 		// For wildcard topics, invalidate all cached results since this subscription might match many topics
-		st.resultCache = xsync.NewMap[string, []*Subscription]()
+		st.resultCache.Clear()
 	}
 
 	return subscription
 }
 
 // Unsubscribe removes a subscription for a topic pattern.
-func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
+func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) {
 	isWildcard := hasWildcard(topic)
 
 	st.totalCount.Sub(1)
@@ -195,7 +196,7 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 		}
 	} else {
 		// For wildcard topics, invalidate all cached results since this unsubscription might affect many topics
-		st.resultCache = xsync.NewMap[string, []*Subscription]()
+		st.resultCache.Clear()
 	}
 
 	// Always clean up the trie for all subscriptions
@@ -207,9 +208,9 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 	currentNode := st.root
 
 	// Pre-allocate nodePath with the exact capacity
-	nodePath := make([]*TrieNode, 0, len(segments))
+	nodePath := make([]*TrieNode[T], 0, len(segments))
 
-	var subscriptions *xsync.Map[uint64, *Subscription]
+	var subscriptions *xsync.Map[uint64, *Subscription[T]]
 
 	// Navigate to the target node - fast path for short segments
 	for _, segment := range segments {
@@ -245,7 +246,7 @@ func (st *SubscriptionTrie) Unsubscribe(topic string, subscriptionID uint64) {
 }
 
 // cleanupEmptyNodesOptimized is an optimized version that avoids Range calls.
-func cleanupEmptyNodesOptimized(nodePath []*TrieNode, segments []string) {
+func cleanupEmptyNodesOptimized[T any](nodePath []*TrieNode[T], segments []string) {
 	for i := len(nodePath) - 1; i >= 0; i-- {
 		parentNode := nodePath[i]
 		childSegment := segments[i]
@@ -267,11 +268,11 @@ func cleanupEmptyNodesOptimized(nodePath []*TrieNode, segments []string) {
 }
 
 // findMatches recursively finds all matching subscriptions for a topic.
-func findMatches(node *TrieNode, segments []string, index int, result map[uint64]*Subscription) {
+func findMatches[T any](node *TrieNode[T], segments []string, index int, result map[uint64]*Subscription[T]) {
 	// If we've reached a "#" node, it matches everything at this level and below
 	if wildcard, exists := node.children.Load("#"); exists {
 		// Safely iterate through the concurrent map
-		wildcard.subscriptions.Range(func(id uint64, sub *Subscription) bool {
+		wildcard.subscriptions.Range(func(id uint64, sub *Subscription[T]) bool {
 			result[id] = sub
 			return true
 		})
@@ -280,7 +281,7 @@ func findMatches(node *TrieNode, segments []string, index int, result map[uint64
 	// If we've processed all segments, add subscriptions at current node
 	if index >= len(segments) {
 		// Safely iterate through the concurrent map
-		node.subscriptions.Range(func(id uint64, sub *Subscription) bool {
+		node.subscriptions.Range(func(id uint64, sub *Subscription[T]) bool {
 			result[id] = sub
 			return true
 		})
@@ -302,7 +303,7 @@ func findMatches(node *TrieNode, segments []string, index int, result map[uint64
 }
 
 // FindMatchingSubscriptions returns all subscriptions that match a given topic.
-func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscription {
+func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscription[T] {
 	// Special case for empty topic
 	if topic == "" {
 		return nil
@@ -324,39 +325,43 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 
 		// Fast path: If there's only a single subscriber (common case), optimize
 		if topicSubs.Size() == 1 {
-			var singleSub *Subscription
-			topicSubs.Range(func(_ uint64, sub *Subscription) bool {
+			var singleSub *Subscription[T]
+
+			topicSubs.Range(func(_ uint64, sub *Subscription[T]) bool {
 				singleSub = sub
 				return false // stop at first
 			})
 
 			// Create a single-element slice without resizing
-			result := []*Subscription{singleSub}
+			result := []*Subscription[T]{singleSub}
 			// Cache the result before returning
 			st.resultCache.Store(topic, result)
+
 			return result
 		}
 
 		// We know approximately how many subscriptions to expect
 		size := topicSubs.Size()
-		result := make([]*Subscription, 0, size)
+		result := make([]*Subscription[T], 0, size)
 
-		topicSubs.Range(func(_ uint64, sub *Subscription) bool {
+		topicSubs.Range(func(_ uint64, sub *Subscription[T]) bool {
 			result = append(result, sub)
 			return true
 		})
 
 		// Cache the result before returning
 		st.resultCache.Store(topic, result)
+
 		return result
 	}
 
 	// If we have exact matches and wildcards, start with exactMatches
-	resultMap := make(map[uint64]*Subscription)
+	resultMap := make(map[uint64]*Subscription[T])
+
 	topicSubs, found := st.exactMatches.Load(topic)
 	if found {
 		// Fill the map with exact matches
-		topicSubs.Range(func(id uint64, sub *Subscription) bool {
+		topicSubs.Range(func(id uint64, sub *Subscription[T]) bool {
 			resultMap[id] = sub
 			return true
 		})
@@ -373,7 +378,7 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 	findMatches(st.root, segments, 0, resultMap)
 
 	// Convert result map to slice with pre-allocated capacity
-	result := make([]*Subscription, 0, estimatedSize)
+	result := make([]*Subscription[T], 0, estimatedSize)
 	for _, sub := range resultMap {
 		result = append(result, sub)
 	}
@@ -384,6 +389,6 @@ func (st *SubscriptionTrie) FindMatchingSubscriptions(topic string) []*Subscript
 	return result
 }
 
-func (st *SubscriptionTrie) Root() *TrieNode {
+func (st *SubscriptionTrie[T]) Root() *TrieNode[T] {
 	return st.root
 }

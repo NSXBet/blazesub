@@ -2,8 +2,8 @@
 
 <p align="center">
   <a href="https://pkg.go.dev/github.com/NSXBet/blazesub"><img src="https://pkg.go.dev/badge/github.com/NSXBet/blazesub.svg" alt="Go Reference"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/NSXBet/blazesub" alt="License"></a>
-  <a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/NSXBet/blazesub" alt="Go Version"></a>
+  <a href="https://github.com/NSXBet/blazesub/blob/main/LICENSE"><img src="https://img.shields.io/github/license/NSXBet/blazesub" alt="License"></a>
+  <a href="https://github.com/NSXBet/blazesub/blob/main/go.mod"><img src="https://img.shields.io/github/go-mod/go-version/NSXBet/blazesub" alt="Go Version"></a>
 </p>
 
 BlazeSub is a high-performance, lock-free publish/subscribe system designed to outperform traditional MQTT brokers. It provides efficient message routing with support for wildcard subscriptions while maintaining thread safety through lock-free data structures.
@@ -17,6 +17,8 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 - **🚀 Efficient topic caching**: Optimizes repeat accesses to common topics
 - **🔄 Flexible message delivery**: Choose between worker pool or direct goroutines for optimal performance
 - **⏱️ Low-latency message delivery**: Direct goroutines up to 52% faster than worker pool and 34% faster than MQTT
+- **📦 Rich metadata support**: Attach arbitrary metadata to messages for enhanced application context
+- **🧩 Generic message types**: Define your own message data types without serialization/deserialization overhead
 
 ## 📊 Performance Highlights
 
@@ -31,13 +33,17 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 - [**API Reference**](https://pkg.go.dev/github.com/NSXBet/blazesub) - Complete API documentation on pkg.go.dev
 - [**User Guide**](USER_GUIDE.md) - Comprehensive guide for using BlazeSub
 - [**Performance Analysis**](PERFORMANCE.md) - Detailed performance metrics and comparisons
-- [**MaxConcurrentSubscriptions Guide**](max_concurrent_subscriptions.md) - Optimizing message delivery to multiple subscribers
+- [**MaxConcurrentSubscriptions Guide**](USER_GUIDE_MAX_CONCURRENT_SUBS.md) - Optimizing message delivery to multiple subscribers
+
+> **Note**: BlazeSub is currently transitioning to generic types for message data. The examples in this README show the new generic API, while some internal components and tests are still being updated. Refer to the [examples section on pkg.go.dev](https://pkg.go.dev/github.com/NSXBet/blazesub#pkg-examples) for the most up-to-date usage patterns.
 
 ## 📝 Quick Start
 
+### With basic []byte messages
+
 ```go
 // Create a new bus with defaults
-bus, err := blazesub.NewBusWithDefaults()
+bus, err := blazesub.NewBusWithDefaults[[]byte]()
 if err != nil {
     log.Fatal(err)
 }
@@ -50,16 +56,69 @@ if err != nil {
 }
 
 // Handle messages
-subscription.OnMessage(func(msg *blazesub.Message) error {
+subscription.OnMessage(blazesub.MessageHandlerFunc[[]byte](func(msg *blazesub.Message[[]byte]) error {
     fmt.Printf("Received: %s\n", string(msg.Data))
-    return nil
-})
 
-// Publish to a topic
-bus.Publish("sensors/temperature", []byte("25.5"))
+    // Access metadata (if any)
+    if msg.Metadata != nil {
+        if unit, ok := msg.Metadata["unit"].(string); ok {
+            fmt.Printf("Unit: %s\n", unit)
+        }
+    }
+
+    return nil
+}))
+
+// Publish to a topic (with metadata)
+metadata := map[string]any{
+    "unit": "celsius",
+    "device_id": "thermostat-living-room",
+}
+bus.Publish("sensors/temperature", []byte("25.5"), metadata)
 
 // When done
 subscription.Unsubscribe()
+```
+
+### With custom message types
+
+```go
+// Define your custom message type
+type SensorReading struct {
+    Value       float64   `json:"value"`
+    Unit        string    `json:"unit"`
+    DeviceID    string    `json:"device_id"`
+    Timestamp   time.Time `json:"timestamp"`
+}
+
+// Create a bus with your custom type
+bus, err := blazesub.NewBusWithDefaults[SensorReading]()
+if err != nil {
+    log.Fatal(err)
+}
+defer bus.Close()
+
+// Subscribe and handle typed messages directly
+subscription, err := bus.Subscribe("sensors/temperature")
+if err != nil {
+    log.Fatal(err)
+}
+
+subscription.OnMessage(blazesub.MessageHandlerFunc[SensorReading](func(msg *blazesub.Message[SensorReading]) error {
+    // Direct access to structured data!
+    reading := msg.Data
+    fmt.Printf("Device %s reports %.1f %s at %s\n",
+        reading.DeviceID, reading.Value, reading.Unit, reading.Timestamp.Format(time.RFC3339))
+    return nil
+}))
+
+// Publish structured data directly
+bus.Publish("sensors/temperature", SensorReading{
+    Value:     22.5,
+    Unit:      "celsius",
+    DeviceID:  "thermostat-living-room",
+    Timestamp: time.Now(),
+})
 ```
 
 For optimal performance, consider using direct goroutines:

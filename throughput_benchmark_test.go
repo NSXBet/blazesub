@@ -14,7 +14,7 @@ type ThroughputHandler struct {
 	count atomic.Int64
 }
 
-func (h *ThroughputHandler) OnMessage(_ *blazesub.Message) error {
+func (h *ThroughputHandler) OnMessage(_ *blazesub.Message[[]byte]) error {
 	h.count.Add(1)
 	return nil
 }

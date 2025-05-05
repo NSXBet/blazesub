@@ -15,7 +15,7 @@ type mockHandler struct {
 	mutex           sync.Mutex
 }
 
-func (m *mockHandler) OnMessage(_ *Message) error {
+func (m *mockHandler) OnMessage(_ *Message[[]byte]) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.messageReceived = true
@@ -31,7 +31,7 @@ func BenchmarkHybridTrieExactMatch(b *testing.B) {
 	const numSubscriptions = 5000
 
 	// Create test implementation
-	trie := NewSubscriptionTrie()
+	trie := NewSubscriptionTrie[[]byte]()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},
@@ -90,7 +90,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 
 	// Benchmark hybrid trie implementation (with exactMatches map)
 	b.Run("HybridTrie", func(b *testing.B) {
-		trie := NewSubscriptionTrie()
+		trie := NewSubscriptionTrie[[]byte]()
 
 		// Populate subscriptions
 		for i := range numSubscriptions {
@@ -116,11 +116,11 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 	// Benchmark an equivalent of the original trie (using only the trie structure, not the exactMatches map)
 	b.Run("OriginalTrie", func(b *testing.B) {
 		// Create an emulated "original" trie by disabling the exactMatches optimization
-		trie := &SubscriptionTrie{
-			root: &TrieNode{
+		trie := &SubscriptionTrie[[]byte]{
+			root: &TrieNode[[]byte]{
 				segment:       "",
-				children:      xsync.NewMap[string, *TrieNode](),
-				subscriptions: xsync.NewMap[uint64, *Subscription](),
+				children:      xsync.NewMap[string, *TrieNode[[]byte]](),
+				subscriptions: xsync.NewMap[uint64, *Subscription[[]byte]](),
 			},
 		}
 
@@ -130,7 +130,7 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			topic := topics[topicIndex]
 
 			// Create a new subscription
-			subscription := &Subscription{
+			subscription := &Subscription[[]byte]{
 				id:            uint64(index),
 				topic:         topic,
 				handler:       handler,
@@ -145,10 +145,10 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			for _, segment := range segments {
 				children, exists := currentNode.children.Load(segment)
 				if !exists {
-					children = &TrieNode{
+					children = &TrieNode[[]byte]{
 						segment:       segment,
-						children:      xsync.NewMap[string, *TrieNode](),
-						subscriptions: xsync.NewMap[uint64, *Subscription](),
+						children:      xsync.NewMap[string, *TrieNode[[]byte]](),
+						subscriptions: xsync.NewMap[uint64, *Subscription[[]byte]](),
 					}
 					currentNode.children.Store(segment, children)
 				}
@@ -172,12 +172,12 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			topic := testTopics[i%len(testTopics)]
 
 			// Manually emulate the original FindMatchingSubscriptions
-			resultMap := make(map[uint64]*Subscription)
+			resultMap := make(map[uint64]*Subscription[[]byte])
 			segments := strings.Split(topic, "/")
 
 			findMatches(trie.root, segments, 0, resultMap)
 
-			result := make([]*Subscription, 0, len(resultMap))
+			result := make([]*Subscription[[]byte], 0, len(resultMap))
 			for _, sub := range resultMap {
 				result = append(result, sub)
 			}
@@ -197,7 +197,7 @@ func BenchmarkMixedWorkload(b *testing.B) {
 	// const numWildcardSubs = 50
 
 	// Create implementations
-	trie := NewSubscriptionTrie()
+	trie := NewSubscriptionTrie[[]byte]()
 	handler := &mockHandler{
 		messageReceived: false,
 		mutex:           sync.Mutex{},

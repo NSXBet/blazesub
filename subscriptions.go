@@ -1,34 +1,30 @@
 package blazesub
 
-// Subscription represents a subscription to a topic.
-type Subscription struct {
+// Subscription represents a subscription to a topic with generic message type.
+type Subscription[T any] struct {
 	id            uint64
 	topic         string
-	handler       MessageHandler
+	handler       MessageHandler[T]
 	unsubscribeFn func() error
 }
 
-// MessageHandlerFunc is a function type that implements MessageHandler interface.
-type MessageHandlerFunc func(message *Message) error
-
-// OnMessage implements MessageHandler interface.
-func (f MessageHandlerFunc) OnMessage(message *Message) error {
-	return f(message)
-}
-
-func (s *Subscription) OnMessage(handler MessageHandler) {
+// OnMessage sets the message handler for this subscription.
+func (s *Subscription[T]) OnMessage(handler MessageHandler[T]) {
 	s.handler = handler
 }
 
-func (s *Subscription) ID() uint64 {
+// ID returns the subscription ID.
+func (s *Subscription[T]) ID() uint64 {
 	return s.id
 }
 
-func (s *Subscription) Topic() string {
+// Topic returns the subscription topic pattern.
+func (s *Subscription[T]) Topic() string {
 	return s.topic
 }
 
-func (s *Subscription) receiveMessage(message *Message) error {
+// receiveMessage handles incoming messages for this subscription.
+func (s *Subscription[T]) receiveMessage(message *Message[T]) error {
 	// Fast path for nil handler (very common in benchmarks)
 	if s.handler == nil {
 		return nil
@@ -39,11 +35,13 @@ func (s *Subscription) receiveMessage(message *Message) error {
 	return s.handler.OnMessage(message)
 }
 
-func (s *Subscription) SetUnsubscribeFunc(fn func() error) {
+// SetUnsubscribeFunc sets the function to call when unsubscribing.
+func (s *Subscription[T]) SetUnsubscribeFunc(fn func() error) {
 	s.unsubscribeFn = fn
 }
 
-func (s *Subscription) Unsubscribe() error {
+// Unsubscribe unsubscribes from the topic.
+func (s *Subscription[T]) Unsubscribe() error {
 	if s.unsubscribeFn != nil {
 		return s.unsubscribeFn()
 	}

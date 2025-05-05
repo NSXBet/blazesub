@@ -103,8 +103,21 @@ config := blazesub.Config{
     MaxConcurrentSubscriptions: 50,  // Good value for most use cases
     UseGoroutinePool: false,  // Direct goroutines mode for maximum throughput
 }
+
+// For byte slice messages
 bus, err := blazesub.NewBus(config)
+
+// Or for custom message types
+type CustomMessage struct {
+    ID      string
+    Content string
+    Time    time.Time
+}
+
+customBus, err := blazesub.NewBusOf[CustomMessage](config)
 ```
+
+The `MaxConcurrentSubscriptions` setting affects performance similarly regardless of the message type used with generics. The performance characteristics described in this document apply to both byte slice messages and custom message types.
 
 ## Advanced Considerations
 

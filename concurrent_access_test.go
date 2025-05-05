@@ -14,7 +14,7 @@ import (
 func TestConcurrentAccess(t *testing.T) {
 	t.Parallel()
 
-	trie := blazesub.NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie[[]byte]()
 	handler := newMockHandler(t)
 
 	numOperations := 100

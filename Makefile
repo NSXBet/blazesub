@@ -1,5 +1,11 @@
+.PHONY: all
+all: test lint
+
 .PHONY: test
-test: gotestsum
+test: gotestsum unit race race-many bench
+
+.PHONY: unit
+unit: gotestsum
 	@gotestsum --format github-actions --format-icons=hivis -- --count=1 ./...
 
 .PHONY: race

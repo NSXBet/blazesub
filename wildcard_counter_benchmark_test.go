@@ -18,7 +18,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 	for _, frequency := range frequencies {
 		b.Run(fmt.Sprintf("WildcardLookup_%d%%", frequency), func(b *testing.B) {
 			// Setup: Create a subscription trie with a mix of exact and wildcard subscriptions
-			trie := blazesub.NewSubscriptionTrie()
+			trie := blazesub.NewSubscriptionTrie[[]byte]()
 			handler := newMockHandler(b)
 
 			// Add 1000 exact match subscriptions
@@ -65,7 +65,7 @@ func BenchmarkWildcardLookupFrequency(b *testing.B) {
 // BenchmarkWildcardCounter measures how the atomic counter affects concurrent performance.
 func BenchmarkWildcardCounter(b *testing.B) {
 	// Create a trie with some subscriptions
-	trie := blazesub.NewSubscriptionTrie()
+	trie := blazesub.NewSubscriptionTrie[[]byte]()
 	handler := newMockHandler(b)
 
 	// Add 1000 exact match subscriptions

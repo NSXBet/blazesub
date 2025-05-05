@@ -15,27 +15,27 @@ import (
 	"go.uber.org/atomic"
 )
 
-type SpyHandler struct {
-	messages *xsync.Map[string, []*blazesub.Message]
+type SpyHandler[T any] struct {
+	messages *xsync.Map[string, []*blazesub.Message[T]]
 	delay    time.Duration
 }
 
-var _ blazesub.MessageHandler = (*SpyHandler)(nil)
+var _ blazesub.MessageHandler[any] = (*SpyHandler[any])(nil)
 
-func (h *SpyHandler) OnMessage(message *blazesub.Message) error {
+func (h *SpyHandler[T]) OnMessage(message *blazesub.Message[T]) error {
 	if h.delay > 0 {
 		time.Sleep(h.delay)
 	}
 
 	if h.messages == nil {
-		h.messages = xsync.NewMap[string, []*blazesub.Message]()
+		h.messages = xsync.NewMap[string, []*blazesub.Message[T]]()
 	}
 
 	// Get current messages for this topic or create empty slice
-	messagesForTopic, _ := h.messages.LoadOrStore(message.Topic, make([]*blazesub.Message, 0))
+	messagesForTopic, _ := h.messages.LoadOrStore(message.Topic, make([]*blazesub.Message[T], 0))
 
 	// Create a new slice with the message appended
-	newMessages := make([]*blazesub.Message, 0, len(messagesForTopic)+1)
+	newMessages := make([]*blazesub.Message[T], 0, len(messagesForTopic)+1)
 	newMessages = append(newMessages, messagesForTopic...)
 	newMessages = append(newMessages, message)
 	h.messages.Store(message.Topic, newMessages)
@@ -43,40 +43,41 @@ func (h *SpyHandler) OnMessage(message *blazesub.Message) error {
 	return nil
 }
 
-func (h *SpyHandler) MessagesReceived() map[string][]*blazesub.Message {
+func (h *SpyHandler[T]) MessagesReceived() map[string][]*blazesub.Message[T] {
 	if h.messages == nil {
-		return make(map[string][]*blazesub.Message)
+		return make(map[string][]*blazesub.Message[T])
 	}
 
 	// Create a copy of the map with deep copies of the message slices.
 	// We can't use xsync.ToPlainMap because it doesn't deep copy the message slices.
-	result := make(map[string][]*blazesub.Message)
+	result := make(map[string][]*blazesub.Message[T])
 
-	h.messages.Range(func(topic string, messages []*blazesub.Message) bool {
+	h.messages.Range(func(topic string, messages []*blazesub.Message[T]) bool {
 		// Create a deep copy of the messages slice to avoid concurrent access issues
-		messagesCopy := make([]*blazesub.Message, len(messages))
+		messagesCopy := make([]*blazesub.Message[T], len(messages))
 		copy(messagesCopy, messages)
 		result[topic] = messagesCopy
+
 		return true
 	})
 
 	return result
 }
 
-func (h *SpyHandler) SetDelay(delay time.Duration) {
+func (h *SpyHandler[T]) SetDelay(delay time.Duration) {
 	h.delay = delay
 }
 
 // Reset clears all stored messages.
-func (h *SpyHandler) Reset() {
-	h.messages = xsync.NewMap[string, []*blazesub.Message]()
+func (h *SpyHandler[T]) Reset() {
+	h.messages = xsync.NewMap[string, []*blazesub.Message[T]]()
 }
 
-func SpyMessageHandler(t *testing.T) *SpyHandler {
+func SpyMessageHandler[T any](t *testing.T) *SpyHandler[T] {
 	t.Helper()
 
-	return &SpyHandler{
-		messages: xsync.NewMap[string, []*blazesub.Message](),
+	return &SpyHandler[T]{
+		messages: xsync.NewMap[string, []*blazesub.Message[T]](),
 		delay:    time.Millisecond * 10,
 	}
 }
@@ -85,7 +86,7 @@ type noOpHandler struct {
 	MessageCount *atomic.Int64
 }
 
-var _ blazesub.MessageHandler = (*noOpHandler)(nil)
+var _ blazesub.MessageHandler[[]byte] = (*noOpHandler)(nil)
 
 //nolint:revive // internal test tool.
 func NoOpHandler(tb testing.TB) *noOpHandler {
@@ -96,7 +97,19 @@ func NoOpHandler(tb testing.TB) *noOpHandler {
 	}
 }
 
-func (h *noOpHandler) OnMessage(_ *blazesub.Message) error {
+func (h *noOpHandler) OnMessage(_ *blazesub.Message[[]byte]) error {
+	h.MessageCount.Add(1)
+
+	return nil
+}
+
+type SharedCounterHandler struct {
+	MessageCount *atomic.Int64
+}
+
+var _ blazesub.MessageHandler[[]byte] = (*SharedCounterHandler)(nil)
+
+func (h *SharedCounterHandler) OnMessage(_ *blazesub.Message[[]byte]) error {
 	h.MessageCount.Add(1)
 
 	return nil
@@ -109,6 +122,7 @@ func RunMQTTServer(tb testing.TB) *mochimqtt.Server {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,
 	}))
+
 	level.Set(slog.LevelError)
 
 	server := mochimqtt.New(
@@ -143,4 +157,19 @@ func RunMQTTServer(tb testing.TB) *mochimqtt.Server {
 	})
 
 	return server
+}
+
+type LatencyMeasureHandler[T any] struct {
+	done chan struct{}
+}
+
+var _ blazesub.MessageHandler[any] = (*LatencyMeasureHandler[any])(nil)
+
+func (h *LatencyMeasureHandler[T]) OnMessage(*blazesub.Message[T]) error {
+	select {
+	case h.done <- struct{}{}:
+	default:
+	}
+
+	return nil
 }

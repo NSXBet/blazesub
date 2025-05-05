@@ -10,7 +10,53 @@ This guide provides practical information for using BlazeSub in your application
 go get github.com/NSXBet/blazesub
 ```
 
-### Basic Usage
+### Creating a Bus
+
+BlazeSub provides four methods for creating a bus, giving you flexibility based on your specific needs:
+
+1. **NewBus** - Creates a []byte bus with custom configuration
+
+   ```go
+   config := blazesub.Config{
+       UseGoroutinePool: true,
+       // other configuration options...
+   }
+   bus, err := blazesub.NewBus(config)
+   ```
+
+2. **NewBusWithDefaults** - Creates a []byte bus with default configuration
+
+   ```go
+   bus, err := blazesub.NewBusWithDefaults()
+   ```
+
+3. **NewBusOf** - Creates a generic bus with custom configuration
+
+   ```go
+   type CustomMessage struct {
+       Field1 string
+       Field2 int
+   }
+
+   config := blazesub.Config{
+       UseGoroutinePool: false,
+       // other configuration options...
+   }
+   bus, err := blazesub.NewBusOf[CustomMessage](config)
+   ```
+
+4. **NewBusWithDefaultsOf** - Creates a generic bus with default configuration
+
+   ```go
+   type CustomMessage struct {
+       Field1 string
+       Field2 int
+   }
+
+   bus, err := blazesub.NewBusWithDefaultsOf[CustomMessage]()
+   ```
+
+### Basic Usage with []byte Messages
 
 ```go
 package main
@@ -23,7 +69,7 @@ import (
 )
 
 func main() {
-    // Create a new bus with default configuration
+    // Create a new bus with default configuration, using []byte as the message type
     bus, err := blazesub.NewBusWithDefaults()
     if err != nil {
         log.Fatal(err)
@@ -37,16 +83,133 @@ func main() {
     }
 
     // Set up message handler
-    subscription.OnMessage(func(msg *blazesub.Message) error {
+    subscription.OnMessage(blazesub.MessageHandlerFunc[[]byte](func(msg *blazesub.Message[[]byte]) error {
         fmt.Printf("Received message on %s: %s\n", msg.Topic, string(msg.Data))
         return nil
-    })
+    }))
 
     // Publish a message
     bus.Publish("sensors/temperature", []byte("25.5"))
 
     // When done, unsubscribe
     subscription.Unsubscribe()
+}
+```
+
+### Using Custom Message Types
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/NSXBet/blazesub"
+)
+
+// Define your custom message type
+type SensorReading struct {
+    Value     float64   `json:"value"`
+    Unit      string    `json:"unit"`
+    DeviceID  string    `json:"device_id"`
+    Timestamp time.Time `json:"timestamp"`
+}
+
+func main() {
+    // Create a bus with your custom type using the generic method
+    bus, err := blazesub.NewBusWithDefaultsOf[SensorReading]()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer bus.Close()
+
+    // Subscribe to a topic
+    subscription, err := bus.Subscribe("sensors/temperature")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Handle typed messages directly
+    subscription.OnMessage(blazesub.MessageHandlerFunc[SensorReading](func(msg *blazesub.Message[SensorReading]) error {
+        // Direct access to structured data without deserialization
+        reading := msg.Data
+        fmt.Printf("Device %s reports %.1f %s at %s\n",
+            reading.DeviceID, reading.Value, reading.Unit,
+            reading.Timestamp.Format(time.RFC3339))
+        return nil
+    }))
+
+    // Publish structured data directly
+    bus.Publish("sensors/temperature", SensorReading{
+        Value:     22.5,
+        Unit:      "celsius",
+        DeviceID:  "thermostat-living-room",
+        Timestamp: time.Now(),
+    })
+
+    // When done, unsubscribe
+    subscription.Unsubscribe()
+}
+```
+
+### Using Custom Configuration with Generic Types
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/NSXBet/blazesub"
+)
+
+// Define your custom message type
+type LogEntry struct {
+    Level     string
+    Message   string
+    Timestamp time.Time
+}
+
+func main() {
+    // Create custom configuration
+    config := blazesub.Config{
+        UseGoroutinePool:           false, // Use direct goroutines for better performance
+        MaxConcurrentSubscriptions: 50,    // Optimize for your workload
+        // Other configuration options...
+    }
+
+    // Create a bus with custom type and configuration
+    bus, err := blazesub.NewBusOf[LogEntry](config)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer bus.Close()
+
+    // Subscribe and use as normal with your custom type
+    subscription, err := bus.Subscribe("logs/system")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    subscription.OnMessage(blazesub.MessageHandlerFunc[LogEntry](func(msg *blazesub.Message[LogEntry]) error {
+        entry := msg.Data
+        fmt.Printf("[%s] %s: %s\n",
+            entry.Timestamp.Format(time.RFC3339),
+            entry.Level,
+            entry.Message)
+        return nil
+    }))
+
+    // Publish a structured message
+    bus.Publish("logs/system", LogEntry{
+        Level:     "INFO",
+        Message:   "System started successfully",
+        Timestamp: time.Now(),
+    })
 }
 ```
 
@@ -75,7 +238,11 @@ config := blazesub.Config{
     ExpiryDuration: 0,
 }
 
+// Create bus with bytes as the message type
 bus, err := blazesub.NewBus(config)
+
+// Or with a custom type
+customBus, err := blazesub.NewBusOf[SensorReading](config)
 ```
 
 ### Configuration Parameters Explained
@@ -147,22 +314,34 @@ BlazeSub is designed for minimal memory usage:
 ### Wildcard Subscriptions
 
 ```go
+// Create a bus with byte slice messages
+bus, err := blazesub.NewBusWithDefaults()
+if err != nil {
+    log.Fatal(err)
+}
+
 // Subscribe to all temperature sensors
 wildcard, err := bus.Subscribe("sensors/+/temperature")
 if err != nil {
     log.Fatal(err)
 }
 
-wildcard.OnMessage(func(msg *blazesub.Message) error {
+wildcard.OnMessage(blazesub.MessageHandlerFunc[[]byte](func(msg *blazesub.Message[[]byte]) error {
     // This will be called for any message matching the pattern
     // e.g., "sensors/living-room/temperature", "sensors/kitchen/temperature", etc.
     return nil
-})
+}))
 ```
 
 ### Multiple Subscribers per Topic
 
 ```go
+// Create a bus with byte slice messages
+bus, err := blazesub.NewBusWithDefaults()
+if err != nil {
+    log.Fatal(err)
+}
+
 // Create multiple subscribers to the same topic
 for i := 0; i < 5; i++ {
     subscription, err := bus.Subscribe("alerts")
@@ -172,10 +351,10 @@ for i := 0; i < 5; i++ {
 
     // Each subscription gets its own handler
     id := i
-    subscription.OnMessage(func(msg *blazesub.Message) error {
+    subscription.OnMessage(blazesub.MessageHandlerFunc[[]byte](func(msg *blazesub.Message[[]byte]) error {
         fmt.Printf("Handler %d received: %s\n", id, string(msg.Data))
         return nil
-    })
+    }))
 }
 
 // Publish - all 5 handlers will receive this message
@@ -185,7 +364,17 @@ bus.Publish("alerts", []byte("System alert!"))
 ### Error Handling in Message Handlers
 
 ```go
-subscription.OnMessage(func(msg *blazesub.Message) error {
+bus, err := blazesub.NewBusWithDefaults()
+if err != nil {
+    log.Fatal(err)
+}
+
+subscription, err := bus.Subscribe("topic")
+if err != nil {
+    log.Fatal(err)
+}
+
+subscription.OnMessage(blazesub.MessageHandlerFunc[[]byte](func(msg *blazesub.Message[[]byte]) error {
     // Do some processing
     if err := processMessage(msg.Data); err != nil {
         // Return the error - this doesn't stop message delivery
@@ -193,7 +382,7 @@ subscription.OnMessage(func(msg *blazesub.Message) error {
         return fmt.Errorf("failed to process message: %w", err)
     }
     return nil
-})
+}))
 ```
 
 ## 🔍 Troubleshooting
@@ -233,17 +422,27 @@ Monitor these key metrics for optimal performance:
 You can implement the `MessageHandler` interface for more complex handling:
 
 ```go
-type CustomHandler struct {
+// Implementation with a custom type
+type CustomHandler[T any] struct {
     // Your fields here
 }
 
-func (h *CustomHandler) OnMessage(msg *blazesub.Message) error {
+var _ blazesub.MessageHandler[[]byte] = (*CustomHandler[[]byte])(nil)
+
+func (h *CustomHandler[T]) OnMessage(msg *blazesub.Message[T]) error {
     // Your custom message handling logic
     return nil
 }
 
-// Use it with a subscription
-subscription.OnMessage(&CustomHandler{})
+// Use it with a byte slice subscription
+bus, _ := blazesub.NewBusWithDefaults()
+subscription, _ := bus.Subscribe("updates")
+subscription.OnMessage(&CustomHandler[[]byte]{})
+
+// Or with a custom type
+typedBus, _ := blazesub.NewBusWithDefaultsOf[SensorReading]()
+typedSubscription, _ := typedBus.Subscribe("readings")
+typedSubscription.OnMessage(&CustomHandler[SensorReading]{})
 ```
 
 ### Combining with Context for Cancellation
@@ -251,6 +450,12 @@ subscription.OnMessage(&CustomHandler{})
 ```go
 ctx, cancel := context.WithCancel(context.Background())
 defer cancel()
+
+// Create a bus with byte slice messages
+bus, err := blazesub.NewBusWithDefaults()
+if err != nil {
+    log.Fatal(err)
+}
 
 // Use context to manage subscription lifetime
 go func() {
@@ -260,10 +465,10 @@ go func() {
         return
     }
 
-    subscription.OnMessage(func(msg *blazesub.Message) error {
+    subscription.OnMessage(blazesub.MessageHandlerFunc[[]byte](func(msg *blazesub.Message[[]byte]) error {
         // Process message
         return nil
-    })
+    }))
 
     // Automatically unsubscribe when context is cancelled
     <-ctx.Done()
@@ -284,3 +489,7 @@ go func() {
 5. **Use wildcard subscriptions judiciously** - too many can impact performance
 
 6. **Use topic hierarchies effectively** to organize your message space (e.g., `app/service/entity/action`)
+
+7. **For complex data structures, use custom types** rather than serializing/deserializing []byte messages
+
+8. **Consider type safety when designing your system** - using generic types can catch errors at compile time

@@ -114,6 +114,7 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 				defer bus.Close()
 
 				handler := &NoOpAtomicHandler{}
+
 				const topic = "test/topic/with/many/subscribers"
 
 				for range subscriberCount {
@@ -123,6 +124,7 @@ func BenchmarkMaxConcurrentSubscriptionsDetailed(b *testing.B) {
 				}
 
 				time.Sleep(100 * time.Millisecond)
+
 				payload := []byte("test-payload")
 
 				b.ResetTimer()

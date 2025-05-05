@@ -13,7 +13,7 @@ import (
 
 type mockMsgHandler struct{}
 
-func (m *mockMsgHandler) OnMessage(_ *blazesub.Message) error {
+func (m *mockMsgHandler) OnMessage(_ *blazesub.Message[[]byte]) error {
 	return nil
 }
 
@@ -67,6 +67,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		}
 		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
+
 		defer func() {
 			require.NoError(b, bus.Close())
 		}()
@@ -97,6 +98,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 
 		b.ResetTimer()
+
 		for i := range b.N {
 			topic := publishTopics[i%len(publishTopics)]
 			bus.Publish(topic, payload)
@@ -114,6 +116,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		}
 		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
+
 		defer func() {
 			require.NoError(b, bus.Close())
 		}()
@@ -144,6 +147,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 
 		b.ResetTimer()
+
 		for i := range b.N {
 			topic := publishTopics[i%len(publishTopics)]
 			bus.Publish(topic, payload)
@@ -175,6 +179,7 @@ func BenchmarkBusVsMQTT(b *testing.B) {
 		time.Sleep(100 * time.Millisecond)
 
 		b.ResetTimer()
+
 		for i := range b.N {
 			topic := publishTopics[i%len(publishTopics)]
 
@@ -212,6 +217,7 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 		}
 		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
+
 		defer func() {
 			require.NoError(b, bus.Close())
 		}()
@@ -233,6 +239,7 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 			for pb.Next() {
 				topic := topics[counter%numTopics]
 				bus.Publish(topic, payload)
+
 				counter++
 			}
 		})
@@ -249,6 +256,7 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 		}
 		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
+
 		defer func() {
 			require.NoError(b, bus.Close())
 		}()
@@ -270,6 +278,7 @@ func BenchmarkBusVsMQTTConcurrent(b *testing.B) {
 			for pb.Next() {
 				topic := topics[counter%numTopics]
 				bus.Publish(topic, payload)
+
 				counter++
 			}
 		})
@@ -323,6 +332,7 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 		}
 		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
+
 		defer func() {
 			require.NoError(b, bus.Close())
 		}()
@@ -361,6 +371,7 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 		}
 		bus, err := blazesub.NewBus(config)
 		require.NoError(b, err)
+
 		defer func() {
 			require.NoError(b, bus.Close())
 		}()
