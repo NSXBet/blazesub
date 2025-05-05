@@ -42,8 +42,8 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 ### With basic []byte messages
 
 ```go
-// Create a new bus with defaults
-bus, err := blazesub.NewBusWithDefaults[[]byte]()
+// Create a new bus with defaults ([]byte for the message)
+bus, err := blazesub.NewBusWithDefaults()
 if err != nil {
     log.Fatal(err)
 }
@@ -92,7 +92,7 @@ type SensorReading struct {
 }
 
 // Create a bus with your custom type
-bus, err := blazesub.NewBusWithDefaults[SensorReading]()
+bus, err := blazesub.NewBusWithDefaultsOf[SensorReading]()
 if err != nil {
     log.Fatal(err)
 }
