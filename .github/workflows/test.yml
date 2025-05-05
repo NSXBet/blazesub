@@ -37,11 +37,12 @@ jobs:
       - name: Run Tests
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
         with:
           file: ./coverage.txt
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   race:
     name: Race Tests
