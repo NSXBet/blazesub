@@ -38,8 +38,6 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 - [**Performance Analysis**](PERFORMANCE.md) - Detailed performance metrics and comparisons
 - [**MaxConcurrentSubscriptions Guide**](USER_GUIDE_MAX_CONCURRENT_SUBS.md) - Optimizing message delivery to multiple subscribers
 
-> **Note**: BlazeSub is currently transitioning to generic types for message data. The examples in this README show the new generic API, while some internal components and tests are still being updated. Refer to the [examples section on pkg.go.dev](https://pkg.go.dev/github.com/NSXBet/blazesub#pkg-examples) for the most up-to-date usage patterns.
-
 ## 📝 Quick Start
 
 ### With basic []byte messages
