@@ -424,3 +424,87 @@ func BenchmarkBusVsMQTTSubscribeUnsubscribe(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkBusVsMQTTSubscribeOnly compares the performance of subscribe operations only.
+//
+//nolint:gocognit // reason: benchmark test code.
+func BenchmarkBusVsMQTTSubscribeOnly(b *testing.B) {
+	// Benchmark for BlazeSub Bus with worker pool
+	b.Run("BlazeSub_WorkerPool_SubscribeOnly", func(b *testing.B) {
+		// Create a new bus with worker pool
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: true, // Use worker pool
+		}
+		bus, err := blazesub.NewBus(config)
+		require.NoError(b, err)
+		defer bus.Close()
+
+		b.ResetTimer()
+
+		for i := range b.N {
+			topic := fmt.Sprintf("test/sub/%d", i)
+
+			// Subscribe
+			sub, serr := bus.Subscribe(topic)
+			if serr != nil {
+				b.Fatalf("Failed to subscribe: %v", serr)
+			}
+
+			// Set a handler
+			handler := &mockMsgHandler{}
+			sub.OnMessage(handler)
+		}
+	})
+
+	// Benchmark for BlazeSub Bus with direct goroutines
+	b.Run("BlazeSub_DirectGoroutines_SubscribeOnly", func(b *testing.B) {
+		// Create a new bus with direct goroutines
+		config := blazesub.Config{
+			WorkerCount:      20000,
+			PreAlloc:         true,
+			MaxBlockingTasks: 100000,
+			UseGoroutinePool: false, // Use direct goroutines
+		}
+		bus, err := blazesub.NewBus(config)
+		require.NoError(b, err)
+		defer bus.Close()
+
+		b.ResetTimer()
+
+		for i := range b.N {
+			topic := fmt.Sprintf("test/sub/%d", i)
+
+			// Subscribe
+			sub, serr := bus.Subscribe(topic)
+			if serr != nil {
+				b.Fatalf("Failed to subscribe: %v", serr)
+			}
+
+			// Set a handler
+			handler := &mockMsgHandler{}
+			sub.OnMessage(handler)
+		}
+	})
+
+	// Benchmark for MQTT Server
+	b.Run("MQTT_SubscribeOnly", func(b *testing.B) {
+		// Create a new MQTT server
+		mqttServer := RunMQTTServer(b)
+		noop := func(*mochimqtt.Client, packets.Subscription, packets.Packet) {}
+
+		b.ResetTimer()
+
+		for i := range b.N {
+			topic := fmt.Sprintf("test/sub/%d", i)
+
+			// Subscribe
+			err := mqttServer.Subscribe(topic, i, noop)
+			if err != nil {
+				b.Fatalf("Failed to subscribe: %v", err)
+			}
+		}
+	})
+}

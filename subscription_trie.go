@@ -138,12 +138,10 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 	}
 
 	// Set the unsubscribe function that references this trie
-	unsubscribeFn := func() error {
-		st.Unsubscribe(topic, subID)
-
+	subscription.SetUnsubscribeFunc(func(topicStr string, subID uint64) error {
+		st.Unsubscribe(topicStr, subID)
 		return nil
-	}
-	subscription.SetUnsubscribeFunc(unsubscribeFn)
+	})
 
 	isWildcard := hasWildcard(topic)
 
