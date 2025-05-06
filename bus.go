@@ -265,8 +265,9 @@ func (b *Bus[T]) Publish(topic string, payload T, metadata ...map[string]any) {
 }
 
 // removeSubscription removes a subscription from the trie.
-func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) {
+func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) error {
 	b.currentSubscriptionsCount.Sub(1)
+
 	b.subscriptions.Unsubscribe(topic, subscriptionID)
 
 	// If this is a wildcard subscription, we need to clear the entire topic cache
@@ -278,6 +279,8 @@ func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) {
 		// For exact topic matches, just remove that topic from the cache
 		b.topicCache.Delete(topic)
 	}
+
+	return nil
 }
 
 // Subscribe creates a new subscription for the specified topic.
@@ -291,12 +294,7 @@ func (b *Bus[T]) Subscribe(topic string) (*Subscription[T], error) {
 	b.topicCache.Delete(topic)
 
 	// Set up unsubscribe function
-	unsubscribeFn := func() error {
-		b.removeSubscription(topic, subID)
-
-		return nil
-	}
-	subscription.SetUnsubscribeFunc(unsubscribeFn)
+	subscription.SetUnsubscribeFunc(b.removeSubscription)
 
 	b.currentSubscriptionsCount.Add(1)
 

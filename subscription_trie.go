@@ -96,12 +96,7 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 	}
 
 	// Set the unsubscribe function that references this trie
-	unsubscribeFn := func() error {
-		st.Unsubscribe(topic, subID)
-
-		return nil
-	}
-	subscription.SetUnsubscribeFunc(unsubscribeFn)
+	subscription.SetUnsubscribeFunc(st.Unsubscribe)
 
 	isWildcard := hasWildcard(topic)
 
@@ -166,7 +161,7 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 }
 
 // Unsubscribe removes a subscription for a topic pattern.
-func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) {
+func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) error {
 	isWildcard := hasWildcard(topic)
 
 	st.totalCount.Sub(1)
@@ -202,7 +197,7 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	// Always clean up the trie for all subscriptions
 	segments := st.splitTopic(topic)
 	if len(segments) == 0 {
-		return
+		return nil
 	}
 
 	currentNode := st.root
@@ -217,7 +212,7 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 		newNode, exists := currentNode.children.Load(segment)
 		if !exists {
 			// Topic path doesn't exist in the trie
-			return
+			return nil
 		}
 
 		nodePath = append(nodePath, currentNode)
@@ -243,6 +238,8 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 		// Use optimized cleanup that doesn't use Range
 		cleanupEmptyNodesOptimized(nodePath, segments)
 	}
+
+	return nil
 }
 
 // cleanupEmptyNodesOptimized is an optimized version that avoids Range calls.

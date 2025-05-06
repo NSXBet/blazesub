@@ -5,7 +5,7 @@ type Subscription[T any] struct {
 	id            uint64
 	topic         string
 	handler       MessageHandler[T]
-	unsubscribeFn func() error
+	unsubscribeFn func(topic string, subID uint64) error
 }
 
 // OnMessage sets the message handler for this subscription.
@@ -36,14 +36,14 @@ func (s *Subscription[T]) receiveMessage(message *Message[T]) error {
 }
 
 // SetUnsubscribeFunc sets the function to call when unsubscribing.
-func (s *Subscription[T]) SetUnsubscribeFunc(fn func() error) {
+func (s *Subscription[T]) SetUnsubscribeFunc(fn func(topic string, subID uint64) error) {
 	s.unsubscribeFn = fn
 }
 
 // Unsubscribe unsubscribes from the topic.
 func (s *Subscription[T]) Unsubscribe() error {
 	if s.unsubscribeFn != nil {
-		return s.unsubscribeFn()
+		return s.unsubscribeFn(s.topic, s.id)
 	}
 
 	return nil
