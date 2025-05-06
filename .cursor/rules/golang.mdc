@@ -1,0 +1,13 @@
+---
+description: 
+globs: *.go
+alwaysApply: false
+---
+# Testing
+
+- Whenever running benchmark tests do not use -run=^$. Use -run="^$" instead.
+
+# Syntax
+
+- Always use `for i := range number` instead of `for i := 0; i < number; i++`.
+- Always use `for range number` if you don't need `i` instead.

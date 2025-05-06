@@ -130,12 +130,8 @@ func BenchmarkHybridVsOriginalTrie(b *testing.B) {
 			topic := topics[topicIndex]
 
 			// Create a new subscription
-			subscription := &Subscription[[]byte]{
-				id:            uint64(index),
-				topic:         topic,
-				handler:       handler,
-				unsubscribeFn: nil,
-			}
+			subscription := NewSubscription[[]byte](uint64(index), topic)
+			subscription.OnMessage(handler)
 
 			// Manually add to trie (simulating original behavior)
 			segments := strings.Split(topic, "/")

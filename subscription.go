@@ -1,11 +1,22 @@
 package blazesub
 
+import "go.uber.org/atomic"
+
 // Subscription represents a subscription to a topic with generic message type.
 type Subscription[T any] struct {
 	id            uint64
 	topic         string
 	handler       MessageHandler[T]
-	unsubscribeFn func() error
+	unsubscribeFn func(topic string, subID uint64) error
+	status        *atomic.Uint32
+}
+
+func NewSubscription[T any](id uint64, topic string) *Subscription[T] {
+	return &Subscription[T]{
+		id:     id,
+		topic:  topic,
+		status: atomic.NewUint32(0),
+	}
 }
 
 // OnMessage sets the message handler for this subscription.
@@ -25,8 +36,8 @@ func (s *Subscription[T]) Topic() string {
 
 // receiveMessage handles incoming messages for this subscription.
 func (s *Subscription[T]) receiveMessage(message *Message[T]) error {
-	// Fast path for nil handler (very common in benchmarks)
-	if s.handler == nil {
+	// Fast path for nil handler (very common in benchmarks) or closed subscription
+	if s.handler == nil || s.IsClosed() {
 		return nil
 	}
 
@@ -36,15 +47,24 @@ func (s *Subscription[T]) receiveMessage(message *Message[T]) error {
 }
 
 // SetUnsubscribeFunc sets the function to call when unsubscribing.
-func (s *Subscription[T]) SetUnsubscribeFunc(fn func() error) {
+func (s *Subscription[T]) SetUnsubscribeFunc(fn func(topic string, subID uint64) error) {
 	s.unsubscribeFn = fn
 }
 
 // Unsubscribe unsubscribes from the topic.
 func (s *Subscription[T]) Unsubscribe() error {
+	isOpen := s.status.CompareAndSwap(0, 1)
+	if !isOpen {
+		return nil
+	}
+
 	if s.unsubscribeFn != nil {
-		return s.unsubscribeFn()
+		return s.unsubscribeFn(s.topic, s.id)
 	}
 
 	return nil
+}
+
+func (s *Subscription[T]) IsClosed() bool {
+	return s.status.Load() >= 1
 }

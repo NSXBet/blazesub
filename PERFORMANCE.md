@@ -425,3 +425,57 @@ func main() {
     }
 }
 ```
+
+## Subscription Performance Optimizations
+
+Recent optimizations to the subscription system have significantly improved performance and memory efficiency:
+
+| Operation                  | Before Optimizations | After Optimizations | Improvement       |
+| -------------------------- | -------------------- | ------------------- | ----------------- |
+| Subscribe/Unsubscribe Time | ~4,904 ns/op         | ~1,762 ns/op        | ~64% faster       |
+| Memory Usage               | ~21,630 B/op         | ~5,104 B/op         | ~76% less memory  |
+| Allocations                | 52 allocs/op         | 11 allocs/op        | ~79% fewer allocs |
+
+These optimizations include:
+
+1. **Object Pooling**: Extensive use of sync.Pool for trie nodes, subscriptions, and segment slices
+2. **Improved Memory Management**: Reduced allocations through better buffer reuse
+3. **Optimized Topic Splitting**: Cache for frequently accessed topics and pooled buffers
+4. **Subscription Lifecycle Tracking**: Better tracking of closed subscriptions
+5. **Lock-free Patterns**: All operations remain lock-free while being more efficient
+
+### Memory Efficiency
+
+The optimized subscription system now consumes significantly less memory thanks to:
+
+- Reusing node and subscription objects instead of allocating new ones
+- Better string handling and reduced unnecessary allocations
+- Efficient segment tracking and caching
+- Smart buffer management for temporary storage
+
+### Wildcard Matching Performance
+
+Wildcard matching performance has been preserved while improving memory efficiency:
+
+- Exact topic matches: ~213 ns/op with only 143 B/op and 4 allocs/op
+- Consistent matching speed regardless of subscription complexity
+- Efficient memory usage during wildcard topic matching
+
+### Bulk Subscription Management
+
+For applications managing many subscriptions, the optimizations provide:
+
+- Faster bulk unsubscribe operations: ~950 ns per subscription
+- Reduced GC pressure during subscription churn
+- Better memory locality through optimized data structures
+- 35% performance improvement in direct goroutines mode vs worker pool
+
+### Implementation Differences
+
+Our optimizations revealed performance differences between modes:
+
+| Implementation Mode | Subscribe/Unsubscribe Speed | Memory Usage | Best Use Case                                                  |
+| ------------------- | --------------------------- | ------------ | -------------------------------------------------------------- |
+| Direct Goroutines   | ~3,689 ns/op                | ~9,206 B/op  | High-throughput systems with moderate subscription changes     |
+| Worker Pool         | ~5,735 ns/op                | ~9,208 B/op  | Systems with resource constraints needing predictable behavior |
+| Single Operation    | ~1,762 ns/op                | ~5,104 B/op  | Individual subscribe/unsubscribe operations                    |

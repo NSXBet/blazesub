@@ -2,6 +2,7 @@ package blazesub
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"go.uber.org/atomic"
@@ -11,6 +12,8 @@ import (
 const (
 	DefaultExactMatchesCapacity = 1024
 	DefaultMaxResultCacheSize   = 10000
+
+	reasonableMaxTopicDepth = 8
 )
 
 // TrieNode represents a node in the subscription trie.
@@ -39,6 +42,12 @@ type SubscriptionTrie[T any] struct {
 	// Caching for frequently used operations
 	resultCache        *xsync.Map[string, []*Subscription[T]] // Cache for frequently accessed topic matches
 	maxResultCacheSize int32                                  // Maximum size of the result cache
+
+	subPool     sync.Pool // Pool for subscription objects
+	segmentPool sync.Pool // Pool for segment slices
+
+	// Used for splitTopic to avoid allocations
+	segmentCache *xsync.Map[string, []string]
 }
 
 // NewSubscriptionTrie creates a new subscription trie.
@@ -51,11 +60,25 @@ func NewSubscriptionTrie[T any]() *SubscriptionTrie[T] {
 		},
 		exactMatches:       xsync.NewMap[string, *xsync.Map[uint64, *Subscription[T]]](),
 		resultCache:        xsync.NewMap[string, []*Subscription[T]](),
+		segmentCache:       xsync.NewMap[string, []string](),
 		maxResultCacheSize: DefaultMaxResultCacheSize,
 
 		wildcardCount:   atomic.NewUint32(0),
 		exactMatchCount: atomic.NewUint32(0),
 		totalCount:      atomic.NewUint32(0),
+		subPool: sync.Pool{
+			New: func() any {
+				return &Subscription[T]{
+					status: atomic.NewUint32(0),
+				}
+			},
+		},
+		segmentPool: sync.Pool{
+			New: func() any {
+				s := make([]string, 0, reasonableMaxTopicDepth) // Most topics have fewer than 8 segments
+				return &s
+			},
+		},
 	}
 
 	return st
@@ -64,6 +87,27 @@ func NewSubscriptionTrie[T any]() *SubscriptionTrie[T] {
 // hasWildcard checks if a subscription pattern contains wildcard characters.
 func hasWildcard(pattern string) bool {
 	return strings.ContainsAny(pattern, "+#")
+}
+
+// Use in Subscribe method.
+func (st *SubscriptionTrie[T]) getNode(segment string) *TrieNode[T] {
+	// Create a new node instead of getting it from a pool
+	return &TrieNode[T]{
+		segment:       segment,
+		children:      xsync.NewMap[string, *TrieNode[T]](),
+		subscriptions: xsync.NewMap[uint64, *Subscription[T]](),
+	}
+}
+
+// Get a subscription from the pool.
+func (st *SubscriptionTrie[T]) getSubscription(id uint64, topic string, handler MessageHandler[T]) *Subscription[T] {
+	sub, _ := st.subPool.Get().(*Subscription[T])
+	sub.id = id
+	sub.topic = topic
+	sub.handler = handler
+	sub.unsubscribeFn = nil
+
+	return sub
 }
 
 func (st *SubscriptionTrie[T]) SubscriptionCount() int {
@@ -78,30 +122,64 @@ func (st *SubscriptionTrie[T]) ExactMatchCount() int {
 	return int(st.exactMatchCount.Load())
 }
 
+// Get a segments buffer from the pool.
+func (st *SubscriptionTrie[T]) getSegmentsBuffer() []string {
+	segmentsPtr, _ := st.segmentPool.Get().(*[]string)
+	segments := (*segmentsPtr)[:0] // Reset length but keep capacity
+
+	return segments
+}
+
+// Return segments buffer to the pool.
+func (st *SubscriptionTrie[T]) recycleSegmentsBuffer(segments []string) {
+	// Create a pointer to the segments slice to avoid allocation
+	segmentsPtr := &segments
+	*segmentsPtr = (*segmentsPtr)[:0] // Clear the slice before returning to pool
+	st.segmentPool.Put(segmentsPtr)
+}
+
 // splitTopic returns cached segments if available, otherwise splits and caches.
 func (st *SubscriptionTrie[T]) splitTopic(topic string) []string {
-	segments := strings.Split(topic, "/")
+	// Try to get from cache first
+	if segments, ok := st.segmentCache.Load(topic); ok {
+		return segments
+	}
+
+	// Get a buffer from the pool
+	segments := st.getSegmentsBuffer()
+
+	// Split the topic
+	start := 0
+
+	for i := range len(topic) {
+		if topic[i] == '/' {
+			segments = append(segments, topic[start:i])
+			start = i + 1
+		}
+	}
+	// Add the final segment
+	if start < len(topic) {
+		segments = append(segments, topic[start:])
+	}
+
+	// Only cache if the map isn't too big (avoid memory leak)
+	if st.segmentCache.Size() < int(st.maxResultCacheSize) {
+		// Create a copy for caching (since we'll return the buffer to the pool)
+		segmentsCopy := make([]string, len(segments))
+		copy(segmentsCopy, segments)
+		st.segmentCache.Store(topic, segmentsCopy)
+	}
 
 	return segments
 }
 
 // Subscribe adds a subscription for a topic pattern.
 func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler MessageHandler[T]) *Subscription[T] {
-	// Create a new subscription
-	subscription := &Subscription[T]{
-		id:            subID,
-		topic:         topic,
-		handler:       handler,
-		unsubscribeFn: nil,
-	}
+	// Create a new subscription from the pool
+	subscription := st.getSubscription(subID, topic, handler)
 
 	// Set the unsubscribe function that references this trie
-	unsubscribeFn := func() error {
-		st.Unsubscribe(topic, subID)
-
-		return nil
-	}
-	subscription.SetUnsubscribeFunc(unsubscribeFn)
+	subscription.SetUnsubscribeFunc(st.Unsubscribe)
 
 	isWildcard := hasWildcard(topic)
 
@@ -117,6 +195,12 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 	// This ensures we'll compute fresh results after a subscription change
 	st.resultCache.Delete(topic)
 
+	// Fast path for exact matches - store directly in exactMatches map
+	if !isWildcard {
+		topicSubs, _ := st.exactMatches.LoadOrStore(topic, xsync.NewMap[uint64, *Subscription[T]]())
+		topicSubs.Store(subID, subscription)
+	}
+
 	// Always add to the trie for node cleanup tests to work properly
 	segments := st.splitTopic(topic)
 
@@ -126,17 +210,14 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 	var subscriptions *xsync.Map[uint64, *Subscription[T]]
 
 	for _, segment := range segments {
-		trieNode, _ := currentNode.children.LoadOrStore(
-			segment,
-			&TrieNode[T]{
-				segment:       segment,
-				children:      xsync.NewMap[string, *TrieNode[T]](),
-				subscriptions: xsync.NewMap[uint64, *Subscription[T]](),
-			},
-		)
+		trieNode, exists := currentNode.children.Load(segment)
+		if !exists {
+			newNode := st.getNode(segment)
+
+			trieNode, _ = currentNode.children.LoadOrStore(segment, newNode)
+		}
 
 		currentNode = trieNode
-
 		subscriptions = trieNode.subscriptions
 
 		// If we reach a wildcard segment "#", it matches everything at this level and below
@@ -148,13 +229,6 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 	// Add the subscription to the final node's map (thread-safe)
 	subscriptions.Store(subID, subscription)
 
-	// If it's an exact match, also add to the exactMatches map
-	if !isWildcard {
-		topicSubs, _ := st.exactMatches.LoadOrStore(topic, xsync.NewMap[uint64, *Subscription[T]]())
-
-		topicSubs.Store(subID, subscription)
-	}
-
 	// Also clear any result caches for related topics
 	// This is important for wildcard subscriptions
 	if isWildcard {
@@ -162,11 +236,31 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 		st.resultCache.Clear()
 	}
 
+	// Return segments buffer to pool if from pool
+	if _, ok := st.segmentCache.Load(topic); !ok {
+		st.recycleSegmentsBuffer(segments)
+	}
+
 	return subscription
 }
 
+// Recycle subscription back to the pool.
+func (st *SubscriptionTrie[T]) recycleSubscription(sub *Subscription[T]) {
+	// Clear references
+	sub.id = 0
+	sub.topic = ""
+	sub.handler = nil
+	sub.status.Store(0)
+	sub.unsubscribeFn = nil
+
+	st.subPool.Put(sub)
+}
+
 // Unsubscribe removes a subscription for a topic pattern.
-func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) {
+// TODO: Refactor as this is a complex method.
+//
+//nolint:gocognit // reason: will be refactored in future PRs
+func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) error {
 	isWildcard := hasWildcard(topic)
 
 	st.totalCount.Sub(1)
@@ -180,17 +274,21 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	// Clear result cache if any exists for this topic
 	st.resultCache.Delete(topic)
 
+	var foundSub *Subscription[T]
+
 	// Fast path for exact matches
+	//nolint:nestif // reason: clear enough
 	if !isWildcard {
 		// Try the direct map lookup first for exact matches
 		topicSubs, found := st.exactMatches.Load(topic)
 		if found {
-			// Delete the specific subscription
-			topicSubs.Delete(subscriptionID)
+			// Get subscription before deleting it for recycling
+			if sub, ok := topicSubs.LoadAndDelete(subscriptionID); ok {
+				foundSub = sub
+			}
 
-			// If the map is empty, remove the topic entry - use a cheaper isEmpty check
-			isEmpty := topicSubs.Size() == 0
-			if isEmpty {
+			// If the map is empty, remove the topic entry
+			if topicSubs.Size() == 0 {
 				st.exactMatches.Delete(topic)
 			}
 		}
@@ -202,28 +300,36 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	// Always clean up the trie for all subscriptions
 	segments := st.splitTopic(topic)
 	if len(segments) == 0 {
-		return
+		if foundSub != nil {
+			st.recycleSubscription(foundSub)
+		}
+
+		return nil
 	}
 
 	currentNode := st.root
-
 	// Pre-allocate nodePath with the exact capacity
 	nodePath := make([]*TrieNode[T], 0, len(segments))
-
-	var subscriptions *xsync.Map[uint64, *Subscription[T]]
 
 	// Navigate to the target node - fast path for short segments
 	for _, segment := range segments {
 		newNode, exists := currentNode.children.Load(segment)
 		if !exists {
 			// Topic path doesn't exist in the trie
-			return
+			if foundSub != nil {
+				st.recycleSubscription(foundSub)
+			}
+
+			// Return segments buffer to pool if from pool
+			if _, ok := st.segmentCache.Load(topic); !ok {
+				st.recycleSegmentsBuffer(segments)
+			}
+
+			return nil
 		}
 
 		nodePath = append(nodePath, currentNode)
 		currentNode = newNode
-
-		subscriptions = currentNode.subscriptions
 
 		// If we reach a wildcard segment "#", it matches everything
 		if segment == "#" {
@@ -231,22 +337,40 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 		}
 	}
 
-	// Delete the subscription from the final node's map
-	// Check if the subscription exists before decrementing the counter
-	subscriptions.Delete(subscriptionID)
+	// Get subscription before deleting it for recycling
+	if foundSub == nil {
+		if sub, ok := currentNode.subscriptions.LoadAndDelete(subscriptionID); ok {
+			foundSub = sub
+		}
+	} else {
+		// We already found the subscription in exactMatches, just delete it here
+		currentNode.subscriptions.Delete(subscriptionID)
+	}
 
 	// Check if the node is now empty - use Size() instead of Range
-	isEmpty := subscriptions.Size() == 0
+	isEmpty := currentNode.subscriptions.Size() == 0
 
 	// Clean up empty nodes only if needed
 	if isEmpty && currentNode.children.Size() == 0 {
 		// Use optimized cleanup that doesn't use Range
-		cleanupEmptyNodesOptimized(nodePath, segments)
+		st.cleanupEmptyNodesOptimized(nodePath, segments)
 	}
+
+	// Recycle the subscription if found
+	if foundSub != nil {
+		st.recycleSubscription(foundSub)
+	}
+
+	// Return segments buffer to pool if from pool
+	if _, ok := st.segmentCache.Load(topic); !ok {
+		st.recycleSegmentsBuffer(segments)
+	}
+
+	return nil
 }
 
 // cleanupEmptyNodesOptimized is an optimized version that avoids Range calls.
-func cleanupEmptyNodesOptimized[T any](nodePath []*TrieNode[T], segments []string) {
+func (st *SubscriptionTrie[T]) cleanupEmptyNodesOptimized(nodePath []*TrieNode[T], segments []string) {
 	for i := len(nodePath) - 1; i >= 0; i-- {
 		parentNode := nodePath[i]
 		childSegment := segments[i]
@@ -340,12 +464,16 @@ func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscr
 			return result
 		}
 
-		// We know approximately how many subscriptions to expect
+		// Optimize the allocation by preallocating the exact size
 		size := topicSubs.Size()
 		result := make([]*Subscription[T], 0, size)
 
 		topicSubs.Range(func(_ uint64, sub *Subscription[T]) bool {
-			result = append(result, sub)
+			// Skip closed subscriptions
+			if !sub.IsClosed() {
+				result = append(result, sub)
+			}
+
 			return true
 		})
 
@@ -355,14 +483,19 @@ func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscr
 		return result
 	}
 
-	// If we have exact matches and wildcards, start with exactMatches
-	resultMap := make(map[uint64]*Subscription[T])
+	// Pre-allocate map with reasonable size to avoid resizing
+	resultMap := make(map[uint64]*Subscription[T], reasonableMaxTopicDepth)
 
+	// If we have exact matches, add them first
 	topicSubs, found := st.exactMatches.Load(topic)
 	if found {
 		// Fill the map with exact matches
 		topicSubs.Range(func(id uint64, sub *Subscription[T]) bool {
-			resultMap[id] = sub
+			// Skip closed subscriptions
+			if !sub.IsClosed() {
+				resultMap[id] = sub
+			}
+
 			return true
 		})
 	}
@@ -371,7 +504,7 @@ func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscr
 	// Get the segments only when needed
 	segments := st.splitTopic(topic)
 
-	// Pre-allocate a result slice to avoid resizing
+	// Pre-allocate a result slice with reasonable capacity
 	estimatedSize := min(int(wildcardCount)+len(resultMap), int(st.maxResultCacheSize))
 
 	// Search the trie for wildcard matches
@@ -379,12 +512,23 @@ func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscr
 
 	// Convert result map to slice with pre-allocated capacity
 	result := make([]*Subscription[T], 0, estimatedSize)
+
 	for _, sub := range resultMap {
-		result = append(result, sub)
+		// Double check for closed subscriptions just to be safe
+		if !sub.IsClosed() {
+			result = append(result, sub)
+		}
 	}
 
 	// Cache the result
-	st.resultCache.Store(topic, result)
+	if len(result) > 0 {
+		st.resultCache.Store(topic, result)
+	}
+
+	// Return segments buffer to pool if from pool
+	if _, ok := st.segmentCache.Load(topic); !ok {
+		st.recycleSegmentsBuffer(segments)
+	}
 
 	return result
 }

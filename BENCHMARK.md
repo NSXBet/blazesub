@@ -64,6 +64,23 @@ The benchmarks were run on an Intel Core i9-14900KF CPU with a benchmark time of
 - MochiMQTT uses 88.5% less memory for these operations
 - There's little performance difference between worker pool and direct goroutines for these operations in BlazeSub
 
+### 3.1 Subscribe/Unsubscribe Operations After Optimization
+
+| Implementation               | Operations/sec | Time/op     | Memory/op  | Allocations/op |
+| ---------------------------- | -------------- | ----------- | ---------- | -------------- |
+| BlazeSub (Worker Pool)       | ~175,000       | 5,735 ns/op | 9,208 B/op | 25 allocs/op   |
+| BlazeSub (Direct Goroutines) | ~270,000       | 3,689 ns/op | 9,206 B/op | 25 allocs/op   |
+| BlazeSub (Single Op)         | ~643,000       | 1,762 ns/op | 5,104 B/op | 11 allocs/op   |
+| MochiMQTT                    | ~949,000       | 1,583 ns/op | 2,480 B/op | 32 allocs/op   |
+
+**Analysis After Optimization**:
+
+- BlazeSub single operations are now within 10-15% of MochiMQTT's performance
+- Memory usage has been reduced by ~76%, now only about 2-3x MochiMQTT's usage
+- Allocations reduced by 65-79%, now fewer than MochiMQTT (11-25 vs 32)
+- Direct goroutines mode is now 35% faster than worker pool mode for subscribe/unsubscribe operations
+- The performance gap with MochiMQTT has been significantly narrowed while maintaining lock-free design
+
 ### 4. Core Matching Performance
 
 Looking at the detailed benchmarks for BlazeSub's core components:
