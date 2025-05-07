@@ -42,5 +42,19 @@ jobs:
 
       - name: Update Go pkg.go.dev
         run: |
-          ESCAPED_MODULE=$(echo $GITHUB_REPOSITORY | tr '[:upper:]' '[:lower:]')
-          curl https://proxy.golang.org/github.com/$ESCAPED_MODULE/@v/$GITHUB_REF_NAME.info
+          curl 'https://pkg.go.dev/fetch/github.com/$ESCAPED_MODULE@$GITHUB_REF_NAME' \
+            -X 'POST' \
+            -H 'accept: */*' \
+            -H 'accept-language: pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7' \
+            -H 'content-length: 0' \
+            -b '_gcl_au=1.1.63009002.1746586980; HaTS_BKT=false; _gid=GA1.2.1195723189.1746586982; _gat_UA-141356704-1=1; _ga_HL38R6X1Q3=GS2.1.s1746586981$o1$g1$t1746587014$j0$l0$h0; _ga=GA1.2.1836958913.1746586981' \
+            -H 'origin: https://pkg.go.dev' \
+            -H 'priority: u=1, i' \
+            -H 'referer: https://pkg.go.dev/github.com/NSXBet/blazesub@v0.3.0' \
+            -H 'sec-ch-ua: "Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"' \
+            -H 'sec-ch-ua-mobile: ?0' \
+            -H 'sec-ch-ua-platform: "macOS"' \
+            -H 'sec-fetch-dest: empty' \
+            -H 'sec-fetch-mode: cors' \
+            -H 'sec-fetch-site: same-origin' \
+            -H 'user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36'
