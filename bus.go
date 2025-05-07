@@ -265,11 +265,18 @@ func (b *Bus[T]) Publish(topic string, payload T, metadata ...map[string]any) {
 }
 
 // removeSubscription removes a subscription from the trie.
-func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) {
-	b.currentSubscriptionsCount.Sub(1)
-	b.subscriptions.Unsubscribe(topic, subscriptionID)
+func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) error {
+	// Remove the subscription from the trie
+	err := b.subscriptions.Unsubscribe(topic, subscriptionID)
+	if err != nil {
+		return err
+	}
 
-	// If this is a wildcard subscription, we need to clear the entire topic cache
+	// Track the current number of subscriptions
+	b.currentSubscriptionsCount.Sub(1)
+
+	// Clear the topic from the cache to ensure fresh results
+	// If this is a wildcard subscription, clear the entire topic cache
 	// as it could affect any number of topics
 	if strings.ContainsAny(topic, "+#") {
 		// For wildcard topics, clear the entire cache as it might affect many topics
@@ -278,27 +285,32 @@ func (b *Bus[T]) removeSubscription(topic string, subscriptionID uint64) {
 		// For exact topic matches, just remove that topic from the cache
 		b.topicCache.Delete(topic)
 	}
+
+	return nil
 }
 
 // Subscribe creates a new subscription for the specified topic.
 func (b *Bus[T]) Subscribe(topic string) (*Subscription[T], error) {
+	// Generate a unique subscription ID
 	subID := b.subID.Add(1)
+
+	// Track the current number of subscriptions
+	b.currentSubscriptionsCount.Add(1)
 
 	// Use the trie's Subscribe method to create and register the subscription
 	subscription := b.subscriptions.Subscribe(subID, topic, nil)
 
-	// Remove from topic cache to ensure it's refreshed on next publish
-	b.topicCache.Delete(topic)
-
 	// Set up unsubscribe function
-	unsubscribeFn := func() error {
-		b.removeSubscription(topic, subID)
+	subscription.SetUnsubscribeFunc(b.removeSubscription)
 
-		return nil
+	// Clear topic from cache to ensure it's refreshed on next publish
+	if strings.ContainsAny(topic, "+#") {
+		// For wildcard topics, clear the entire cache as it might affect many topics
+		b.topicCache.Clear()
+	} else {
+		// For exact topic matches, just remove that topic from the cache
+		b.topicCache.Delete(topic)
 	}
-	subscription.SetUnsubscribeFunc(unsubscribeFn)
-
-	b.currentSubscriptionsCount.Add(1)
 
 	return subscription, nil
 }
