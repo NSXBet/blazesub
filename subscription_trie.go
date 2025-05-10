@@ -2,7 +2,6 @@ package blazesub
 
 import (
 	"strings"
-	"sync"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"go.uber.org/atomic"
@@ -43,9 +42,6 @@ type SubscriptionTrie[T any] struct {
 	resultCache        *xsync.Map[string, []*Subscription[T]] // Cache for frequently accessed topic matches
 	maxResultCacheSize int32                                  // Maximum size of the result cache
 
-	subPool     sync.Pool // Pool for subscription objects
-	segmentPool sync.Pool // Pool for segment slices
-
 	// Used for splitTopic to avoid allocations
 	segmentCache *xsync.Map[string, []string]
 }
@@ -66,19 +62,6 @@ func NewSubscriptionTrie[T any]() *SubscriptionTrie[T] {
 		wildcardCount:   atomic.NewUint32(0),
 		exactMatchCount: atomic.NewUint32(0),
 		totalCount:      atomic.NewUint32(0),
-		subPool: sync.Pool{
-			New: func() any {
-				return &Subscription[T]{
-					status: atomic.NewUint32(0),
-				}
-			},
-		},
-		segmentPool: sync.Pool{
-			New: func() any {
-				s := make([]string, 0, reasonableMaxTopicDepth) // Most topics have fewer than 8 segments
-				return &s
-			},
-		},
 	}
 
 	return st
@@ -101,11 +84,13 @@ func (st *SubscriptionTrie[T]) getNode(segment string) *TrieNode[T] {
 
 // Get a subscription from the pool.
 func (st *SubscriptionTrie[T]) getSubscription(id uint64, topic string, handler MessageHandler[T]) *Subscription[T] {
-	sub, _ := st.subPool.Get().(*Subscription[T])
-	sub.id = id
-	sub.topic = topic
-	sub.handler = handler
-	sub.unsubscribeFn = nil
+	sub := &Subscription[T]{
+		id:            id,
+		topic:         topic,
+		handler:       handler,
+		status:        atomic.NewUint32(0),
+		unsubscribeFn: nil,
+	}
 
 	return sub
 }
@@ -124,18 +109,9 @@ func (st *SubscriptionTrie[T]) ExactMatchCount() int {
 
 // Get a segments buffer from the pool.
 func (st *SubscriptionTrie[T]) getSegmentsBuffer() []string {
-	segmentsPtr, _ := st.segmentPool.Get().(*[]string)
-	segments := (*segmentsPtr)[:0] // Reset length but keep capacity
+	segments := make([]string, 0, reasonableMaxTopicDepth)
 
 	return segments
-}
-
-// Return segments buffer to the pool.
-func (st *SubscriptionTrie[T]) recycleSegmentsBuffer(segments []string) {
-	// Create a pointer to the segments slice to avoid allocation
-	segmentsPtr := &segments
-	*segmentsPtr = (*segmentsPtr)[:0] // Clear the slice before returning to pool
-	st.segmentPool.Put(segmentsPtr)
 }
 
 // splitTopic returns cached segments if available, otherwise splits and caches.
@@ -164,10 +140,7 @@ func (st *SubscriptionTrie[T]) splitTopic(topic string) []string {
 
 	// Only cache if the map isn't too big (avoid memory leak)
 	if st.segmentCache.Size() < int(st.maxResultCacheSize) {
-		// Create a copy for caching (since we'll return the buffer to the pool)
-		segmentsCopy := make([]string, len(segments))
-		copy(segmentsCopy, segments)
-		st.segmentCache.Store(topic, segmentsCopy)
+		st.segmentCache.Store(topic, segments)
 	}
 
 	return segments
@@ -236,24 +209,7 @@ func (st *SubscriptionTrie[T]) Subscribe(subID uint64, topic string, handler Mes
 		st.resultCache.Clear()
 	}
 
-	// Return segments buffer to pool if from pool
-	if _, ok := st.segmentCache.Load(topic); !ok {
-		st.recycleSegmentsBuffer(segments)
-	}
-
 	return subscription
-}
-
-// Recycle subscription back to the pool.
-func (st *SubscriptionTrie[T]) recycleSubscription(sub *Subscription[T]) {
-	// Clear references
-	sub.id = 0
-	sub.topic = ""
-	sub.handler = nil
-	sub.status.Store(0)
-	sub.unsubscribeFn = nil
-
-	st.subPool.Put(sub)
 }
 
 // Unsubscribe removes a subscription for a topic pattern.
@@ -300,10 +256,6 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	// Always clean up the trie for all subscriptions
 	segments := st.splitTopic(topic)
 	if len(segments) == 0 {
-		if foundSub != nil {
-			st.recycleSubscription(foundSub)
-		}
-
 		return nil
 	}
 
@@ -315,16 +267,6 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	for _, segment := range segments {
 		newNode, exists := currentNode.children.Load(segment)
 		if !exists {
-			// Topic path doesn't exist in the trie
-			if foundSub != nil {
-				st.recycleSubscription(foundSub)
-			}
-
-			// Return segments buffer to pool if from pool
-			if _, ok := st.segmentCache.Load(topic); !ok {
-				st.recycleSegmentsBuffer(segments)
-			}
-
 			return nil
 		}
 
@@ -339,9 +281,9 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 
 	// Get subscription before deleting it for recycling
 	if foundSub == nil {
-		if sub, ok := currentNode.subscriptions.LoadAndDelete(subscriptionID); ok {
-			foundSub = sub
-		}
+		// Try to find and delete the subscription from current node
+		// Note: We don't use the result as it might be nil anyway
+		currentNode.subscriptions.LoadAndDelete(subscriptionID)
 	} else {
 		// We already found the subscription in exactMatches, just delete it here
 		currentNode.subscriptions.Delete(subscriptionID)
@@ -354,16 +296,6 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	if isEmpty && currentNode.children.Size() == 0 {
 		// Use optimized cleanup that doesn't use Range
 		st.cleanupEmptyNodesOptimized(nodePath, segments)
-	}
-
-	// Recycle the subscription if found
-	if foundSub != nil {
-		st.recycleSubscription(foundSub)
-	}
-
-	// Return segments buffer to pool if from pool
-	if _, ok := st.segmentCache.Load(topic); !ok {
-		st.recycleSegmentsBuffer(segments)
 	}
 
 	return nil
@@ -523,11 +455,6 @@ func (st *SubscriptionTrie[T]) FindMatchingSubscriptions(topic string) []*Subscr
 	// Cache the result
 	if len(result) > 0 {
 		st.resultCache.Store(topic, result)
-	}
-
-	// Return segments buffer to pool if from pool
-	if _, ok := st.segmentCache.Load(topic); !ok {
-		st.recycleSegmentsBuffer(segments)
 	}
 
 	return result

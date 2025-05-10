@@ -36,8 +36,8 @@ func TestConcurrentAccess(t *testing.T) {
 
 		wg.Wait()
 
-		require.Equal(t, trie.SubscriptionCount(), num)
-		require.Equal(t, trie.ExactMatchCount(), num)
+		require.Equal(t, num, trie.SubscriptionCount())
+		require.Equal(t, num, trie.ExactMatchCount())
 		require.Equal(t, 0, trie.WildcardCount())
 
 		require.Len(t, trie.FindMatchingSubscriptions("concurrent/topic"), num)
@@ -86,5 +86,5 @@ func TestConcurrentAccess(t *testing.T) {
 
 	// Since we have numOperations subscriptions, and numOperations FindMatchingSubscriptions
 	// calls, we should have numOperations * numOperations calls to the handler.
-	require.Equal(t, found.Load(), uint32(numOperations)*uint32(numOperations))
+	require.Equal(t, uint32(numOperations)*uint32(numOperations), found.Load())
 }
