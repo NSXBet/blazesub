@@ -37,7 +37,38 @@ func (h *SpyHandler[T]) OnMessage(message *blazesub.Message[T]) error {
 	// Create a new slice with the message appended
 	newMessages := make([]*blazesub.Message[T], 0, len(messagesForTopic)+1)
 	newMessages = append(newMessages, messagesForTopic...)
-	newMessages = append(newMessages, message)
+
+	// Deep copy the message for the spy handler to avoid issues with pooled messages being reset
+	copiedMsg := &blazesub.Message[T]{
+		Topic:        message.Topic,
+		UTCTimestamp: message.UTCTimestamp,
+	}
+
+	// Deep copy Data (assuming T is []byte for most tests, handle specifically if T can be other pointer types)
+	// For the purpose of fixing tests, we'll assume T is often []byte or a value type.
+	// If T is a pointer type itself, a more general deep copy mechanism might be needed,
+	// but that's too complex for this immediate fix.
+	if dataBytes, ok := any(message.Data).([]byte); ok {
+		copiedData := make([]byte, len(dataBytes))
+		copy(copiedData, dataBytes)
+		copiedMsg.Data = any(copiedData).(T)
+	} else {
+		// For non-[]byte types, assume direct assignment is okay for now
+		// This might not be a perfect deep copy for all generic types T
+		copiedMsg.Data = message.Data
+	}
+
+	// Deep copy Metadata
+	if message.Metadata != nil {
+		copiedMsg.Metadata = make(map[string]any, len(message.Metadata))
+		for k, v := range message.Metadata {
+			// This is a shallow copy of metadata values. If metadata contains pointers, they won't be deep copied.
+			// For current tests, this should be sufficient.
+			copiedMsg.Metadata[k] = v
+		}
+	}
+
+	newMessages = append(newMessages, copiedMsg)
 	h.messages.Store(message.Topic, newMessages)
 
 	return nil

@@ -3,6 +3,7 @@ package blazesub
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -45,6 +46,8 @@ type Bus[T any] struct {
 	maxConcurrentSubscriptions int
 	useGoroutinePool           bool // Whether using worker pool or direct goroutines
 
+	messagePool *sync.Pool
+
 	currentSubscriptionsCount *atomic.Uint64
 	inflightMessagesCount     *atomic.Uint64
 }
@@ -74,6 +77,11 @@ func NewBusOf[T any](config Config) (*Bus[T], error) {
 		useGoroutinePool:           config.UseGoroutinePool,
 		currentSubscriptionsCount:  atomic.NewUint64(0),
 		inflightMessagesCount:      atomic.NewUint64(0),
+		messagePool: &sync.Pool{
+			New: func() any {
+				return &Message[T]{}
+			},
+		},
 	}
 
 	// Only initialize worker pool if needed
@@ -156,22 +164,12 @@ func (b *Bus[T]) Publish(topic string, payload T, metadata ...map[string]any) {
 	}
 
 	var metadataMap map[string]any
-
 	if len(metadata) > 0 {
 		metadataMap = metadata[0]
 	}
 
-	// Create the message only once
-	msg := &Message[T]{
-		Topic:        topic,
-		Data:         payload,
-		UTCTimestamp: time.Now().UTC(),
-		Metadata:     metadataMap,
-	}
-
 	// Try to get subscribers from cache first for common topics
 	var matchingSubs []*Subscription[T]
-
 	if cachedSubs, exists := b.topicCache.Load(topic); exists {
 		matchingSubs = cachedSubs
 	} else {
@@ -192,75 +190,102 @@ func (b *Bus[T]) Publish(topic string, payload T, metadata ...map[string]any) {
 
 	b.inflightMessagesCount.Add(uint64(subscriberCount))
 
-	// Fast path for single subscriber (very common case)
+	// Path 1: Single subscriber (common case) - Use message pool
 	if subscriberCount == 1 {
+		msg := b.messagePool.Get().(*Message[T])
+		msg.Topic = topic
+		msg.Data = payload
+		msg.UTCTimestamp = time.Now().UTC()
+		msg.Metadata = metadataMap
+
 		subscription := matchingSubs[0]
 
 		if b.useGoroutinePool {
 			// Use worker pool
 			_ = b.pubpool.Submit(func() {
 				defer b.inflightMessagesCount.Sub(1)
-
+				defer func() {
+					msg.Reset()
+					b.messagePool.Put(msg)
+				}()
 				_ = subscription.receiveMessage(msg)
 			})
 		} else {
 			// Use direct goroutine
 			go func() {
 				defer b.inflightMessagesCount.Sub(1)
-
+				defer func() {
+					msg.Reset()
+					b.messagePool.Put(msg)
+				}()
 				_ = subscription.receiveMessage(msg)
 			}()
 		}
-
-		return
+		return // Message lifecycle managed by the async task/goroutine
 	}
 
-	// For a small number of subscribers, submit them individually
-	if subscriberCount <= b.maxConcurrentSubscriptions {
-		for _, subscription := range matchingSubs {
-			sub := subscription // Local copy for closure
+	// Path 2: For larger subscriber sets, batch them to reduce overhead - Use message pool
+	if subscriberCount > b.maxConcurrentSubscriptions {
+		msg := b.messagePool.Get().(*Message[T])
+		msg.Topic = topic
+		msg.Data = payload
+		msg.UTCTimestamp = time.Now().UTC()
+		msg.Metadata = metadataMap
 
-			if b.useGoroutinePool {
-				// Use worker pool
-				_ = b.pubpool.Submit(func() {
-					defer b.inflightMessagesCount.Sub(1)
-
-					_ = sub.receiveMessage(msg)
-				})
-			} else {
-				// Use direct goroutine
-				go func(s *Subscription[T]) {
-					defer b.inflightMessagesCount.Sub(1)
-
-					_ = s.receiveMessage(msg)
-				}(sub)
-			}
+		if b.useGoroutinePool {
+			// Use worker pool with batching
+			_ = b.pubpool.Submit(func() {
+				defer func() {
+					msg.Reset()
+					b.messagePool.Put(msg)
+				}()
+				// Process all subscriptions in a single task
+				for _, subscription := range matchingSubs {
+					_ = subscription.receiveMessage(msg)
+					b.inflightMessagesCount.Sub(1) // inflight is decremented for each processed message
+				}
+			})
+		} else {
+			// Use a single goroutine for batching
+			go func() {
+				defer func() {
+					msg.Reset()
+					b.messagePool.Put(msg)
+				}()
+				// Process all subscriptions in a single goroutine
+				for _, subscription := range matchingSubs {
+					_ = subscription.receiveMessage(msg)
+					b.inflightMessagesCount.Sub(1) // inflight is decremented for each processed message
+				}
+			}()
 		}
-
-		return
+		return // Message lifecycle managed by the async task/goroutine
 	}
 
-	// For larger subscriber sets, batch them to reduce overhead
-	if b.useGoroutinePool {
-		// Use worker pool with batching
-		_ = b.pubpool.Submit(func() {
-			// Process all subscriptions in a single task
-			for _, subscription := range matchingSubs {
-				_ = subscription.receiveMessage(msg)
+	// Path 3: For a small number of subscribers (fan-out) - Regular allocation (NO POOLING for msg)
+	// This is because the same msg pointer is passed to multiple goroutines, and managing its pooled lifecycle safely is complex.
+	msg := &Message[T]{
+		Topic:        topic,
+		Data:         payload,
+		UTCTimestamp: time.Now().UTC(),
+		Metadata:     metadataMap,
+	}
 
-				b.inflightMessagesCount.Sub(1)
-			}
-		})
-	} else {
-		// Use a single goroutine for batching
-		go func() {
-			// Process all subscriptions in a single goroutine
-			for _, subscription := range matchingSubs {
-				_ = subscription.receiveMessage(msg)
-
-				b.inflightMessagesCount.Sub(1)
-			}
-		}()
+	for _, subscription := range matchingSubs {
+		sub := subscription // Local copy for closure
+		if b.useGoroutinePool {
+			// Use worker pool
+			_ = b.pubpool.Submit(func() {
+				defer b.inflightMessagesCount.Sub(1)
+				_ = sub.receiveMessage(msg) // msg is the normally allocated one
+			})
+		} else {
+			// Use direct goroutine
+			go func(s *Subscription[T]) {
+				defer b.inflightMessagesCount.Sub(1)
+				_ = s.receiveMessage(msg) // msg is the normally allocated one
+			}(sub)
+		}
 	}
 }
 

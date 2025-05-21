@@ -11,6 +11,15 @@ type Subscription[T any] struct {
 	status        *atomic.Uint32
 }
 
+// Reset clears the Subscription fields for reuse.
+func (s *Subscription[T]) Reset() {
+	s.id = 0 // Or some other indicator of a reset/pooled state if needed
+	s.topic = ""
+	s.handler = nil
+	s.unsubscribeFn = nil
+	s.status.Store(0) // Reset status to 0 (active/ready for reuse)
+}
+
 func NewSubscription[T any](id uint64, topic string) *Subscription[T] {
 	return &Subscription[T]{
 		id:     id,

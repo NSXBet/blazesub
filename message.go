@@ -29,3 +29,12 @@ func NewMessage[T any](topic string, data T, metadata ...map[string]any) *Messag
 		UTCTimestamp: time.Now().UTC(),
 	}
 }
+
+// Reset clears the message fields for reuse, preparing it to be put back into a sync.Pool.
+func (m *Message[T]) Reset() {
+	var zeroVal T // Ensures proper zeroing for generic type T
+	m.Topic = ""
+	m.Data = zeroVal
+	m.Metadata = nil
+	m.UTCTimestamp = time.Time{}
+}

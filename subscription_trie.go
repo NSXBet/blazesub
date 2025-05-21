@@ -2,6 +2,7 @@ package blazesub
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/puzpuzpuz/xsync/v4"
 	"go.uber.org/atomic"
@@ -20,6 +21,15 @@ type TrieNode[T any] struct {
 	segment       string
 	children      *xsync.Map[string, *TrieNode[T]]
 	subscriptions *xsync.Map[uint64, *Subscription[T]] // Use thread-safe map for subscriptions
+}
+
+// Reset clears the TrieNode fields for reuse.
+func (tn *TrieNode[T]) Reset() {
+	tn.segment = ""
+	// Re-initialize maps to ensure they are clean for reuse.
+	// xsync.Map does not have a Clear method.
+	tn.children = xsync.NewMap[string, *TrieNode[T]]()
+	tn.subscriptions = xsync.NewMap[uint64, *Subscription[T]]()
 }
 
 func (t *TrieNode[T]) Children() map[string]*TrieNode[T] {
@@ -44,6 +54,11 @@ type SubscriptionTrie[T any] struct {
 
 	// Used for splitTopic to avoid allocations
 	segmentCache *xsync.Map[string, []string]
+
+	// Pool for TrieNode objects
+	trieNodePool *sync.Pool
+	// Pool for Subscription objects
+	subscriptionPool *sync.Pool
 }
 
 // NewSubscriptionTrie creates a new subscription trie.
@@ -64,6 +79,26 @@ func NewSubscriptionTrie[T any]() *SubscriptionTrie[T] {
 		totalCount:      atomic.NewUint32(0),
 	}
 
+	// Initialize the TrieNode pool
+	st.trieNodePool = &sync.Pool{
+		New: func() any {
+			return &TrieNode[T]{
+				children:      xsync.NewMap[string, *TrieNode[T]](),
+				subscriptions: xsync.NewMap[uint64, *Subscription[T]](),
+			}
+		},
+	}
+
+	// Initialize the Subscription pool
+	st.subscriptionPool = &sync.Pool{
+		New: func() any {
+			// Create a new subscription with its status atomic initialized.
+			return &Subscription[T]{
+				status: atomic.NewUint32(0),
+			}
+		},
+	}
+
 	return st
 }
 
@@ -74,24 +109,21 @@ func hasWildcard(pattern string) bool {
 
 // Use in Subscribe method.
 func (st *SubscriptionTrie[T]) getNode(segment string) *TrieNode[T] {
-	// Create a new node instead of getting it from a pool
-	return &TrieNode[T]{
-		segment:       segment,
-		children:      xsync.NewMap[string, *TrieNode[T]](),
-		subscriptions: xsync.NewMap[uint64, *Subscription[T]](),
-	}
+	// Get a node from the pool
+	node := st.trieNodePool.Get().(*TrieNode[T])
+	node.segment = segment
+	// Children and subscriptions are expected to be new/empty maps from Reset or New.
+	return node
 }
 
 // Get a subscription from the pool.
 func (st *SubscriptionTrie[T]) getSubscription(id uint64, topic string, handler MessageHandler[T]) *Subscription[T] {
-	sub := &Subscription[T]{
-		id:            id,
-		topic:         topic,
-		handler:       handler,
-		status:        atomic.NewUint32(0),
-		unsubscribeFn: nil,
-	}
-
+	sub := st.subscriptionPool.Get().(*Subscription[T])
+	sub.id = id
+	sub.topic = topic
+	sub.handler = handler // Note: handler can be nil initially
+	// sub.status is already reset to 0 by Reset() or New()
+	// sub.unsubscribeFn is nil by default after Reset, will be set by Subscribe.
 	return sub
 }
 
@@ -279,13 +311,16 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 		}
 	}
 
-	// Get subscription before deleting it for recycling
+	// Get subscription before deleting it for recycling.
+	// foundSub might already be populated from the exactMatches check.
 	if foundSub == nil {
-		// Try to find and delete the subscription from current node
-		// Note: We don't use the result as it might be nil anyway
-		currentNode.subscriptions.LoadAndDelete(subscriptionID)
+		// If not found in exactMatches, try to find and delete from the trie node.
+		if sub, ok := currentNode.subscriptions.LoadAndDelete(subscriptionID); ok {
+			foundSub = sub // Assign if found and deleted here
+		}
 	} else {
-		// We already found the subscription in exactMatches, just delete it here
+		// If foundSub was populated from exactMatches, we still need to ensure
+		// it's removed from this trie node's list if it exists there.
 		currentNode.subscriptions.Delete(subscriptionID)
 	}
 
@@ -296,6 +331,12 @@ func (st *SubscriptionTrie[T]) Unsubscribe(topic string, subscriptionID uint64) 
 	if isEmpty && currentNode.children.Size() == 0 {
 		// Use optimized cleanup that doesn't use Range
 		st.cleanupEmptyNodesOptimized(nodePath, segments)
+	}
+
+	// If a subscription was found and removed (now stored in foundSub), reset and pool it.
+	if foundSub != nil {
+		foundSub.Reset()
+		st.subscriptionPool.Put(foundSub)
 	}
 
 	return nil
@@ -316,6 +357,8 @@ func (st *SubscriptionTrie[T]) cleanupEmptyNodesOptimized(nodePath []*TrieNode[T
 		isEmpty := childNode.subscriptions.Size() == 0
 		if isEmpty && childNode.children.Size() == 0 {
 			parentNode.children.Delete(childSegment)
+			childNode.Reset() // Reset the state of the removed node
+			st.trieNodePool.Put(childNode) // Put it back in the pool
 		} else {
 			// If we find a non-empty node, stop cleanup
 			break
