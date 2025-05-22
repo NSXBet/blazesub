@@ -38,6 +38,53 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 - [**Performance Analysis**](PERFORMANCE.md) - Detailed performance metrics and comparisons
 - [**MaxConcurrentSubscriptions Guide**](USER_GUIDE_MAX_CONCURRENT_SUBS.md) - Optimizing message delivery to multiple subscribers
 
+## 🔍 Subscription Types
+
+BlazeSub supports both exact and wildcard subscriptions, following the MQTT topic matching rules:
+
+### Exact Match Subscriptions
+- Match topics exactly as specified
+- Example: `sensors/temperature` only matches messages published to `sensors/temperature`
+
+### Wildcard Subscriptions
+BlazeSub supports two types of wildcards:
+
+#### Single-Level Wildcard (+)
+- Matches exactly one level in the topic hierarchy
+- Can be used multiple times in a topic
+- Examples:
+  - `sensors/+/temperature` matches:
+    - `sensors/room1/temperature`
+    - `sensors/room2/temperature`
+    - But not `sensors/temperature` or `sensors/room1/floor1/temperature`
+  - `+/+/temperature` matches any topic with exactly three levels ending in `temperature`
+
+#### Multi-Level Wildcard (#)
+- Matches any number of levels in the topic hierarchy
+- Must be the last character in the topic
+- Can only be used once
+- Examples:
+  - `sensors/#` matches:
+    - `sensors/temperature`
+    - `sensors/humidity`
+    - `sensors/room1/temperature`
+    - Any topic starting with `sensors/`
+  - `#` matches all topics
+
+### Subscription Examples
+```go
+// Exact match
+bus.Subscribe("sensors/temperature")
+
+// Single-level wildcard
+bus.Subscribe("sensors/+/temperature")  // Matches any single level
+bus.Subscribe("+/+/temperature")        // Matches exactly three levels
+
+// Multi-level wildcard
+bus.Subscribe("sensors/#")              // Matches all sensors topics
+bus.Subscribe("#")                      // Matches all topics
+```
+
 ## 📝 Quick Start
 
 ### With basic []byte messages
