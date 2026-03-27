@@ -18,7 +18,7 @@ jobs:
         with:
           go-version: stable
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: nsx-actions/golangci_golangci-lint-action@v7
         with:
           version: v2.1.5
 
@@ -38,7 +38,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Upload coverage reports to Codecov
-        uses: codecov/codecov-action@v5
+        uses: nsx-actions/codecov_codecov-action@v5
         with:
           file: ./coverage.txt
           fail_ci_if_error: false
