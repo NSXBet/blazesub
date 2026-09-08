@@ -1,6 +1,7 @@
 package blazesub_test
 
 import (
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,7 +91,9 @@ func BenchmarkThroughputWith1000Subscribers(b *testing.B) {
 			// Start with a fresh count
 			handler.count.Store(0)
 
-			// Record start time for our own throughput calculation
+			// The clock runs until every published message has been delivered
+			// to all subscriber handlers, so the reported throughput is
+			// end-to-end delivery throughput, not publish-side dispatch.
 			startTime := time.Now()
 
 			// Run the benchmark
@@ -98,27 +101,33 @@ func BenchmarkThroughputWith1000Subscribers(b *testing.B) {
 				bus.Publish(pubTopic, payload)
 			}
 
-			// Wait for message processing to complete (conservative wait time)
-			time.Sleep(500 * time.Millisecond)
+			// Wait until every published message reached every subscriber.
+			target := int64(b.N) * subscriberCount
+			deadline := time.Now().Add(60 * time.Second)
+			for handler.count.Load() < target {
+				if time.Now().After(deadline) {
+					b.Fatalf(
+						"delivery incomplete: %d/%d deliveries after 60s",
+						handler.count.Load(),
+						target,
+					)
+				}
+				runtime.Gosched()
+			}
 
-			// Calculate actual throughput (messages per second)
+			// Calculate actual throughput (message deliveries per second)
 			elapsedSeconds := time.Since(startTime).Seconds()
-			messagesSent := b.N
-			messagesReceived := handler.count.Load()
-
-			// Because each message goes to 1000 subscribers, we multiply by 1000
-			messagesPerSecond := float64(messagesSent) * subscriberCount / elapsedSeconds
+			deliveries := handler.count.Load()
+			messagesPerSecond := float64(deliveries) / elapsedSeconds
 
 			// Report custom metrics
 			b.ReportMetric(messagesPerSecond, "msg/s")
-			b.ReportMetric(float64(messagesReceived)/float64(messagesSent*subscriberCount)*100, "delivery_%")
 
 			// Also log for easy viewing
 			b.Logf(
-				"Throughput: %.2f msgs/sec, Total: %d sent, %d received in %.2f seconds",
+				"Throughput: %.2f msgs/sec, Total: %d deliveries in %.2f seconds",
 				messagesPerSecond,
-				messagesSent*subscriberCount,
-				messagesReceived,
+				deliveries,
 				elapsedSeconds,
 			)
 		})
