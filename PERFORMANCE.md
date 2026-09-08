@@ -4,16 +4,28 @@ This document provides performance metrics and recommendations for BlazeSub user
 
 ## Message Throughput Benchmarks
 
-Our benchmarks show extraordinary performance, demonstrating BlazeSub's capability to handle high-volume messaging:
+All figures below are end-to-end delivery throughput: the clock stops only when every published message has reached every subscriber handler.
 
-| Scenario                | Direct Goroutines | Worker Pool      | Improvement over MQTT |
-| ----------------------- | ----------------- | ---------------- | --------------------- |
-| Direct match messages   | 84.7 million/sec  | 77.1 million/sec | 30-50x faster         |
-| Wildcard match messages | 83.5 million/sec  | 73.8 million/sec | 1,000-5,000x faster   |
-| Memory usage            | ~115 B/op         | ~114 B/op        | 95% less memory       |
-| Allocations             | 2 allocs/op       | 2 allocs/op      | 80% fewer allocations |
+**Fan-out to 1000 subscribers** (deliveries per second, Apple M4 Pro, Go 1.26.6, 3 runs each):
 
-These results represent the number of message deliveries per second when publishing to 1000 subscribers, demonstrating BlazeSub's exceptional throughput capacity even under high subscription load.
+| Scenario                | Direct Goroutines | Worker Pool      |
+| ----------------------- | ----------------- | ---------------- |
+| Direct match            | 9.9–10.7M/s       | 12.4–12.6M/s     |
+| Wildcard match          | 9.8–10.5M/s       | 12.7–12.8M/s     |
+
+**vs MochiMQTT** (5000 subscriptions across 1000 topics, 20% wildcard-matching publishes; in-process routing with no network I/O — this measures routing speed, not end-to-end broker throughput):
+
+| Benchmark               | BlazeSub (best)   | MochiMQTT        | BlazeSub advantage            |
+| ----------------------- | ----------------- | ---------------- | ----------------------------- |
+| Single publish          | 1,396 ns/op       | 1,442 ns/op      | ~1.04x faster, 7x less memory |
+| Concurrent publish      | 325 ns/op         | 637 ns/op        | ~1.9x faster, 11x less memory |
+| Subscribe/unsubscribe   | 5,195 ns/op       | 1,487 ns/op      | 3.5x slower                   |
+
+Reproduce with:
+
+```bash
+go test -run='^$' -bench 'BenchmarkThroughputWith1000Subscribers|BenchmarkBusVsMQTT$|BenchmarkBusVsMQTTConcurrent|BenchmarkBusVsMQTTSubscribeUnsubscribe' -benchtime=3s -benchmem -count=3 .
+```
 
 ## Delivery Mode Comparison
 
@@ -23,9 +35,8 @@ BlazeSub offers two delivery modes, each with different performance characterist
 
 **Advantages:**
 
-- Up to 84.7 million messages/second to 1000 subscribers
-- 10-13% faster than worker pool mode
-- Lowest possible latency
+- Up to 10.7 million message deliveries/second to 1000 subscribers
+- ~2x faster than the worker pool at small subscriber counts; at 1000 subscribers the worker pool delivers slightly faster
 
 **Best for:**
 
@@ -52,7 +63,7 @@ bus, err := blazesub.NewBusOf[MyCustomType](config)
 
 **Advantages:**
 
-- Still delivers 77.1 million messages/second to 1000 subscribers
+- Up to 12.8 million message deliveries/second to 1000 subscribers
 - Better resource management
 - Protection against goroutine explosion
 
@@ -99,8 +110,8 @@ BlazeSub is designed for minimal memory usage. To optimize further:
 
 1. **Worker Pool vs Direct Goroutines**:
 
-   - Direct goroutines: Faster but creates more goroutines
-   - Worker pool: Slightly slower but better memory management
+   - Direct goroutines: ~2x faster at small subscriber counts, slightly slower at 1000 subscribers
+   - Worker pool: the fast fan-out path at 1000 subscribers and predictable resource usage
 
 2. **Topic Design Impact**:
 
@@ -187,16 +198,13 @@ bus, err := blazesub.NewBusOf[CompactEvent](config)
 
 ## Performance Scaling
 
-BlazeSub performance scales with different workloads:
+We re-measured scaling up to 1000 subscribers; larger counts are not claimed because we have not benchmarked them.
 
 | Subscribers | Direct Goroutines | Worker Pool      |
 | ----------- | ----------------- | ---------------- |
-| 10          | 95.1 million/sec  | 92.5 million/sec |
-| 100         | 92.8 million/sec  | 88.3 million/sec |
-| 1,000       | 84.7 million/sec  | 77.1 million/sec |
-| 10,000      | 62.3 million/sec  | 51.9 million/sec |
+| 1,000       | 9.9–10.7M/s       | 12.4–12.6M/s     |
 
-This shows BlazeSub maintains excellent performance even at high subscriber counts.
+Note the crossover: at small subscriber counts direct goroutines are roughly twice as fast as the worker pool, but by 1000 subscribers the fixed cost of fanning out goroutines dominates and the worker pool delivers slightly faster.
 
 ## Hardware Considerations
 
