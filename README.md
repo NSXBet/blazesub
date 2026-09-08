@@ -13,23 +13,41 @@ BlazeSub is a high-performance, lock-free publish/subscribe system designed to o
 
 ## ✨ Features
 
-- **⚡ Ultra-fast performance**: Up to [84.7 million messages per second delivered to 1000 subscribers](PERFORMANCE.md)
+- **⚡ High-throughput delivery**: Up to 12.8 million message deliveries per second to 1000 subscribers
 - **🧠 Zero memory allocations**: Core operations don't allocate memory, reducing GC pressure
 - **🔒 Thread-safe by design**: Uses lock-free data structures for maximum concurrency
 - **🌳 MQTT-compatible topic matching**: Supports single-level (+) and multi-level (#) wildcards
 - **🚀 Efficient topic caching**: Optimizes repeat accesses to common topics
 - **🔄 Flexible message delivery**: Choose between worker pool or direct goroutines for optimal performance
-- **⏱️ Low-latency message delivery**: Direct goroutines up to 52% faster than worker pool and 34% faster than MQTT
-- **📦 Rich metadata support**: Attach arbitrary metadata to messages for enhanced application context
-- **🧩 Generic message types**: Define your own message data types without serialization/deserialization overhead
+- **📉 Memory efficiency**: Uses 7–14x less memory per publish than MochiMQTT
+- **0️⃣ Zero allocations** for core subscription matching operations
+- **🗑️ Minimal GC impact**: Only 2 allocations per publish operation
 
 ## 📊 Performance Highlights
 
-- **💯 Direct match throughput**: 84.7 million messages per second to 1000 subscribers
-- **🔍 Wildcard match throughput**: 83.5 million messages per second to 1000 subscribers
-- **📉 Memory efficiency**: Uses up to 95% less memory than MochiMQTT
-- **0️⃣ Zero allocations** for core subscription matching operations
-- **🗑️ Minimal GC impact**: Only 2 allocations per publish operation
+All numbers measured on an Apple M4 Pro (Go 1.26.6); the fan-out figures are end-to-end delivery throughput — the clock stops only when every message has reached every subscriber handler. See [PERFORMANCE.md](PERFORMANCE.md) for methodology and how to reproduce.
+
+**Fan-out to 1000 subscribers** (deliveries per second, 3 runs each):
+
+| Scenario                | Direct Goroutines | Worker Pool      |
+| ----------------------- | ----------------- | ---------------- |
+| Direct match            | 9.9–10.7M/s       | 12.4–12.6M/s     |
+| Wildcard match          | 9.8–10.5M/s       | 12.7–12.8M/s     |
+
+**vs MochiMQTT** (5000 subscriptions across 1000 topics, 20% wildcard-matching publishes, in-process routing with no network I/O):
+
+| Benchmark               | BlazeSub (best)   | MochiMQTT        | BlazeSub advantage            |
+| ----------------------- | ----------------- | ---------------- | ----------------------------- |
+| Single publish          | 1,396 ns/op       | 1,442 ns/op      | ~1.04x faster, 7x less memory |
+| Concurrent publish      | 325 ns/op         | 637 ns/op        | ~1.9x faster, 11x less memory |
+| Subscribe/unsubscribe   | 5,195 ns/op       | 1,487 ns/op      | 3.5x slower                   |
+
+## ⚖️ Tradeoffs
+
+- **Subscription churn is slow**: subscribing/unsubscribing is ~3.5x slower than MochiMQTT (copy-on-write subscription trie). BlazeSub favors publish fan-out over frequent subscription changes.
+- **Worker pool vs MQTT on single publishes**: with a large worker pool, a single publish can be slower than MochiMQTT's in-process routing (3.3μs vs 1.4μs) — use direct goroutines for the fast path.
+- **Delivery mode**: direct goroutines are ~2x faster than the worker pool at small subscriber counts; at 1000 subscribers the fixed overhead of goroutine fan-out dominates and the worker pool delivers slightly faster.
+- **The old headline was wrong**: previous versions of these docs claimed 84.7M msg/s and "30–50x faster than MQTT"; re-measurement showed those figures came from a timing flaw in the benchmark (a fixed sleep inside the measured window) and network-free comparisons presented as broker speed.
 
 ## 📘 Documentation
 
