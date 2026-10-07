@@ -11,7 +11,7 @@ permissions:
 jobs:
   benchmark:
     name: Performance Benchmarks
-    runs-on: ubuntu-latest
+    runs-on: self-hosted-amd64
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
@@ -123,7 +123,7 @@ jobs:
 
   optimize-benchmarks:
     name: Advanced Performance Analysis
-    runs-on: ubuntu-latest
+    runs-on: self-hosted-amd64
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
